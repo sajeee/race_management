@@ -11,6 +11,13 @@ COPY . /app/
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
+# Collect static files
 RUN python manage.py collectstatic --noinput
-CMD ["sh", "-c", "daphne -b 0.0.0.0 -p ${PORT:-8000} race_management.asgi:application"]
 
+# Railway doesn't always inject $PORT for Docker builds, so set a default
+ENV PORT=8000
+
+EXPOSE 8000
+
+# Print port for debugging, then run Daphne
+CMD sh -c 'echo "🚀 Starting on port ${PORT}"; daphne -b 0.0.0.0 -p ${PORT} race_management.asgi:application'
