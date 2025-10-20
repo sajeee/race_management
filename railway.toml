@@ -1,2 +1,0 @@
-[build]
-aptPkgs = ["gdal-bin", "libgdal-dev", "libproj-dev", "libgeos-dev"]

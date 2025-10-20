@@ -1,13 +1,13 @@
 import os
 from pathlib import Path
-
-GDAL_LIBRARY_PATH = r"C:\Users\DotNet\miniconda3\envs\env_race\Library\bin\gdal.dll"
+import dj_database_url  # <-- add this package to requirements
+#GDAL_LIBRARY_PATH = r"C:\Users\DotNet\miniconda3\envs\env_race\Library\bin\gdal.dll"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET', 'dev-secret')
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -66,10 +66,11 @@ MIDDLEWARE = [
 #     }
 # }
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.contrib.gis.db.backends.spatialite',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=600,
+        engine='django.contrib.gis.db.backends.postgis'
+    )
 }
 SPATIALITE_LIBRARY_PATH = 'mod_spatialite'
 
@@ -85,8 +86,17 @@ REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost' if not os.environ.get('DOC
 # }
 # Use in-memory channel layer for local dev (no Redis needed)
 # Celery
-CELERY_BROKER_URL = f"redis://{REDIS_HOST}:6379/0"
-CELERY_RESULT_BACKEND = f"redis://{REDIS_HOST}:6379/1"
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+        },
+    },
+}
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -112,3 +122,9 @@ STATICFILES_DIRS = [
 
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Security
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+CSRF_TRUSTED_ORIGINS = [f"https://{os.environ.get('RAILWAY_STATIC_URL', '')}"]

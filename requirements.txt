@@ -20,6 +20,7 @@ cron_descriptor==2.0.6
 cryptography==46.0.2
 daphne==4.2.1
 Django==4.2
+dj_database_url
 django-celery-beat==2.8.1
 django-timezone-field==7.1
 djangorestframework==3.16.1
@@ -33,7 +34,7 @@ idna==3.10
 incremental==24.7.2
 kombu==5.5.4
 msgpack==1.1.2
-numpy @ file:///D:/bld/bld/rattler-build_numpy_1757504919/work/dist/numpy-2.3.3-cp311-cp311-win_amd64.whl#sha256=151c641a67b28475a3e2caacf01559a5106a617a76830fa8d44eed02af8c59b0
+numpy==2.3.3
 packaging==25.0
 prompt_toolkit==3.0.52
 psycopg2-binary==2.9.10
