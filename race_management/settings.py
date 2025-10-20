@@ -9,9 +9,6 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET', 'dev-secret')
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = ["*",]
 # Add Railway domain automatically
-RAILWAY_HOSTNAME = os.environ.get("RAILWAY_STATIC_URL") or os.environ.get("RAILWAY_URL")
-if RAILWAY_HOSTNAME:
-    ALLOWED_HOSTS.append(RAILWAY_HOSTNAME.replace("https://", "").replace("http://", ""))
 
 
 INSTALLED_APPS = [
