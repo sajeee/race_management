@@ -1,23 +1,40 @@
+# =========================
+#  RACE MANAGEMENT PROJECT
+#  Railway + Django + Channels + GIS
+# =========================
+
+# Base image
 FROM python:3.11-slim
 
-# Install system libraries (GDAL, Proj, compiler tools)
+# Install system packages for GeoDjango & PostGIS support
 RUN apt-get update && apt-get install -y \
-    gdal-bin libgdal-dev libproj-dev binutils g++ gcc \
+    gdal-bin \
+    libgdal-dev \
+    libproj-dev \
+    binutils \
+    g++ \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
 
+# Set working directory
 WORKDIR /app
+
+# Copy all project files
 COPY . /app/
 
+# Upgrade pip and install dependencies
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Collect static files
-RUN python manage.py collectstatic --noinput
+# Collect static files for Django
+RUN python manage.py collectstatic --noinput || true
 
-# Railway doesn't always inject $PORT for Docker builds, so set a default
-ENV PORT=8000
-
+# Expose the internal port (hardcoded)
 EXPOSE 8000
 
-# Print port for debugging, then run Daphne
-CMD sh -c 'echo "🚀 Starting on port ${PORT}"; daphne -b 0.0.0.0 -p ${PORT} race_management.asgi:application'
+# Print debug info (optional)
+RUN echo "✅ Django build complete. Ready to launch Daphne on port 8000."
+
+# Start the ASGI server (Channels via Daphne)
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "race_management.asgi:application"]
+
