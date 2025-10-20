@@ -7,7 +7,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET', 'dev-secret')
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
-ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+ALLOWED_HOSTS = [
+    "127.0.0.1",
+    "localhost",
+    "web-production-58a8f.up.railway.app",  # 👈 replace this with your actual Railway domain
+]
+
 
 # Add Railway domain automatically
 RAILWAY_HOSTNAME = os.environ.get("RAILWAY_STATIC_URL") or os.environ.get("RAILWAY_URL")
