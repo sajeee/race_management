@@ -12,5 +12,5 @@ RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
 RUN python manage.py collectstatic --noinput
-CMD daphne -b 0.0.0.0 -p $PORT race_management.asgi:application
+CMD ["sh", "-c", "daphne -b 0.0.0.0 -p ${PORT:-8000} race_management.asgi:application"]
 
