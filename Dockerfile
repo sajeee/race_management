@@ -3,7 +3,7 @@ FROM python:3.11-slim
 
 # System deps (GDAL, Geo libs, PostgreSQL client, Redis support)
 RUN apt-get update && apt-get install -y \
-    gdal-bin libgdal-dev binutils libproj-dev g++ gcc \
+    gdal-bin=3.11* libgdal-dev=3.11* binutils libproj-dev g++ gcc \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
