@@ -35,6 +35,5 @@ EXPOSE 8000
 # Print debug info (optional)
 RUN echo "✅ Django build complete. Ready to launch Daphne on port 8000."
 
-# Start the ASGI server (Channels via Daphne)
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "race_management.asgi:application"]
+CMD ["sh", "-c", "daphne -b 0.0.0.0 -p ${PORT:-8000} race_management.asgi:application"]
 
