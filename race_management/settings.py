@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    
 
     # GeoDjango
     'django.contrib.gis',
@@ -132,3 +133,15 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Security
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 CSRF_TRUSTED_ORIGINS = [f"https://{os.environ.get('RAILWAY_STATIC_URL', '')}"]
+#######################################PRODUCTION############
+# Allow Android/Tasker/API access
+CORS_ALLOW_ALL_ORIGINS = True
+CSRF_TRUSTED_ORIGINS = [
+    "https://web-production-58a8f.up.railway.app",
+]
+
+# Optional: to simplify Android testing
+CSRF_COOKIE_SECURE = False
+SESSION_COOKIE_SECURE = False
+INSTALLED_APPS += ['corsheaders']
+MIDDLEWARE.insert(1, 'corsheaders.middleware.CorsMiddleware')
