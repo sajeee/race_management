@@ -7,8 +7,15 @@ from django.urls import reverse_lazy
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', RedirectView.as_view(url=reverse_lazy('tracking:dashboard', kwargs={'race_id': 1}), permanent=False)),
-    path('', include('tracking.urls')),
+
+    # ✅ include tracking with namespace
+    path('tracking/', include(('tracking.urls', 'tracking'), namespace='tracking')),
+
+    # ✅ redirect root URL to race dashboard 1
+    path('', RedirectView.as_view(
+        url=reverse_lazy('tracking:dashboard', kwargs={'race_id': 1}),
+        permanent=False
+    )),
 ]
 
 if settings.DEBUG:
