@@ -1,8 +1,9 @@
-#tracking/urls.py
 from django.urls import path
 from . import views
 
+app_name = 'tracking'
+
 urlpatterns = [
-    path("race/<int:race_id>/dashboard/", views.dashboard, name="dashboard"),
-    path("api/tracking/<int:race_id>/post_location/", views.post_location, name="post_location"),
+    path('', views.dashboard_home, name='dashboard_home'),
+    path('<int:race_id>/dashboard/', views.dashboard, name='dashboard'),
 ]
