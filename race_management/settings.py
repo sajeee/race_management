@@ -9,6 +9,7 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET', 'dev-secret')
 DEBUG = True
 ALLOWED_HOSTS = ["*", "web-production-58a8f.up.railway.app"]
 
+
 # Add Railway domain automatically
 
 
