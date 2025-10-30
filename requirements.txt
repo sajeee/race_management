@@ -22,6 +22,7 @@ daphne==4.2.1
 Django==4.2
 dj_database_url==3.0.1
 django-celery-beat==2.8.1
+django-cors-headers
 django-timezone-field==7.1
 djangorestframework==3.16.1
 GDAL==3.10.3
