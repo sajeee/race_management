@@ -7,8 +7,8 @@ from django.urls import reverse_lazy
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('tracking/', include(('tracking.urls', 'tracking'), namespace='tracking')),
-    path('', RedirectView.as_view(url=reverse_lazy('tracking:dashboard_home'), permanent=False)),
+    path('', RedirectView.as_view(url=reverse_lazy('tracking:dashboard', kwargs={'race_id': 1}), permanent=False)),
+    path('', include('tracking.urls')),
 ]
 
 if settings.DEBUG:
