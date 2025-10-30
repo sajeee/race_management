@@ -91,17 +91,17 @@ REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost' if not os.environ.get('DOC
 # }
 # Use in-memory channel layer for local dev (no Redis needed)
 # Celery
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [REDIS_URL],
-        },
-    },
-}
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
+#REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+#CHANNEL_LAYERS = {
+#   "default": {
+#       "BACKEND": "channels_redis.core.RedisChannelLayer",
+#        "CONFIG": {
+#            "hosts": [REDIS_URL],
+#        },
+#    },
+#}
+#CELERY_BROKER_URL = REDIS_URL
+#CELERY_RESULT_BACKEND = REDIS_URL
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
