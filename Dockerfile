@@ -1,6 +1,6 @@
 # =========================
 #  RACE MANAGEMENT PROJECT
-#  Railway + Django + Channels + GIS
+#  Railway + Django + Channels + GIS (GDAL)
 # =========================
 
 # Base image
@@ -29,11 +29,14 @@ RUN pip install -r requirements.txt
 # Collect static files for Django
 RUN python manage.py collectstatic --noinput || true
 
-# Expose the internal port (hardcoded)
+# Expose a default port (for local dev)
 EXPOSE 8000
 
+# ✅ Ensure Railway (or any host) provides PORT env var
+ENV PORT=${PORT:-8000}
+
 # Print debug info (optional)
-RUN echo "✅ Django build complete. Ready to launch Daphne on port 8000."
+RUN echo "✅ Django + Daphne will run on port $PORT"
 
-CMD ["sh", "-c", "daphne -b 0.0.0.0 -p ${PORT:-8000} race_management.asgi:application"]
-
+# ✅ Start Daphne with dynamic port binding
+CMD ["sh", "-c", "daphne -b 0.0.0.0 -p ${PORT} race_management.asgi:application"]
