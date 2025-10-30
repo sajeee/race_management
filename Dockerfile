@@ -39,4 +39,5 @@ ENV PORT=${PORT:-8000}
 RUN echo "✅ Django + Daphne will run on port $PORT"
 
 # ✅ Start Daphne with dynamic port binding
-CMD ["sh", "-c", "daphne -b 0.0.0.0 -p ${PORT} race_management.asgi:application"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && daphne -b 0.0.0.0 -p ${PORT:-8000} race_management.asgi:application"]
+
