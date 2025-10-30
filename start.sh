@@ -1,24 +1,26 @@
 #!/usr/bin/env sh
+set -e  # Exit immediately if a command fails
+
 PORT=${PORT:-8000}
-echo "Starting Daphne on port $PORT"
-exec daphne -b 0.0.0.0 -p "$PORT" race_management.asgi:application
+echo "🚀 Starting Django + Daphne on port $PORT"
 
+# Create a flag file so setup runs only once
+SETUP_FLAG="/app/.setup_done"
 
-echo "🚀 Running Django setup on Railway..."
+if [ ! -f "$SETUP_FLAG" ]; then
+  echo "🧱 Running initial Django setup..."
 
-# Stop on first error
-set -e
+  # 1️⃣ Run migrations
+  echo "📦 Applying migrations..."
+  python manage.py migrate --noinput
 
-echo "📦 Applying database migrations..."
-python manage.py migrate --noinput
+  # 2️⃣ Create superuser if not exists
+  echo "👤 Checking for superuser..."
+  DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-admin}
+  DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
+  DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD:-admin123}
 
-echo "👤 Creating superuser (if not exists)..."
-# Auto-create a superuser using env vars (safe for Railway one-off commands)
-DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-admin}
-DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
-DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD:-admin123}
-
-python manage.py shell <<EOF
+  python manage.py shell <<EOF
 from django.contrib.auth import get_user_model
 User = get_user_model()
 if not User.objects.filter(username="$DJANGO_SUPERUSER_USERNAME").exists():
@@ -32,8 +34,18 @@ else:
     print("ℹ️ Superuser already exists.")
 EOF
 
-echo "🧱 Collecting static files..."
-python manage.py collectstatic --noinput
+  # 3️⃣ Collect static files
+  echo "🗂️ Collecting static files..."
+  python manage.py collectstatic --noinput || true
 
-echo "✅ Django setup complete!"
+  echo "✅ Django setup complete."
+  touch "$SETUP_FLAG"
+else
+  echo "⚡ Django setup already done, skipping migrations and collectstatic."
+fi
+
+# 4️⃣ Start Daphne
+echo "🚀 Launching Daphne on port $PORT..."
+exec daphne -b 0.0.0.0 -p "$PORT" race_management.asgi:application
+
 
