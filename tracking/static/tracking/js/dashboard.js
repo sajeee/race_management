@@ -1,32 +1,18 @@
-console.log("🚀 Final dashboard.js loaded");
+console.log("🚀 dashboard.js LOADED (live-safe version)");
 
-// ------------------------------------------------------------
-// CONFIG
-// ------------------------------------------------------------
 const WS_PROTO = window.location.protocol === "https:" ? "wss" : "ws";
 const WS_URL = `${WS_PROTO}://${window.location.host}/ws/race/${window.RACE_ID}/`;
 console.log("🌐 WebSocket URL:", WS_URL);
 
-window.runnerData = {};
+window.map = L.map("map").setView([31.5204, 74.3587], 13);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap contributors",
+}).addTo(window.map);
+
 window.markers = {};
+window.runnerData = {};
 
-// ------------------------------------------------------------
-// MAP INIT
-// ------------------------------------------------------------
-(function initMap() {
-  const el = document.getElementById("map");
-  if (!el) return console.error("❌ #map missing");
-  window.map = L.map(el).setView([31.5204, 74.3587], 13);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors",
-  }).addTo(window.map);
-  console.log("🗺️ Map initialized");
-})();
-
-// ------------------------------------------------------------
-// HELPERS
-// ------------------------------------------------------------
 function moveMarkerSmooth(marker, fromLatLng, toLatLng, duration = 1000) {
   const start = Date.now();
   const from = { lat: fromLatLng[0], lng: fromLatLng[1] };
@@ -42,6 +28,33 @@ function moveMarkerSmooth(marker, fromLatLng, toLatLng, duration = 1000) {
   requestAnimationFrame(animate);
 }
 
+function updateLeaderboard() {
+  const tbody = document.querySelector("#leaderboard tbody");
+  if (!tbody) return;
+
+  const runners = Object.values(window.runnerData);
+  runners.sort((a, b) => (b.distance_m || 0) - (a.distance_m || 0));
+
+  tbody.innerHTML = "";
+  runners.forEach((r, index) => {
+    const medal = ["🥇", "🥈", "🥉"][index] || "";
+    const pace = r.pace_min_km ? r.pace_min_km.toFixed(1) : "-";
+    const speed = r.speed_kmh ? r.speed_kmh.toFixed(1) : "-";
+    const ago = r.last_update ? timeAgo(r.last_update) : "-";
+
+    tbody.innerHTML += `
+      <tr data-id="${r.runner_id}">
+        <td>${index + 1}</td>
+        <td>${r.runner_id}</td>
+        <td>${medal} ${r.name}</td>
+        <td>${r.distance_m?.toFixed(1) || 0}</td>
+        <td>${pace}</td>
+        <td>${speed}</td>
+        <td>${ago}</td>
+      </tr>`;
+  });
+}
+
 function timeAgo(ts) {
   const diff = (Date.now() - ts) / 1000;
   if (diff < 60) return `${Math.floor(diff)}s ago`;
@@ -49,118 +62,76 @@ function timeAgo(ts) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-function updateLeaderboard() {
-  const tbody = document.querySelector("#leaderboard tbody");
-  if (!tbody) return;
-
-  const runners = Object.values(window.runnerData);
-  if (!runners.length) {
-    tbody.innerHTML = `<tr><td colspan="7">Waiting for runners...</td></tr>`;
-    return;
-  }
-
-  runners.sort((a, b) => (b.distance_m || 0) - (a.distance_m || 0));
-  tbody.innerHTML = "";
-
-  runners.forEach((r, i) => {
-    const paceMinKm = r.pace_min_km ? r.pace_min_km.toFixed(2) : "-";
-    const speedKmh = r.speed_kmh ? r.speed_kmh.toFixed(2) : "-";
-
-    const tr = document.createElement("tr");
-    tr.dataset.id = r.runner_id;
-    tr.innerHTML = `
-      <td>${i + 1}</td>
-      <td>${r.runner_id}</td>
-      <td>${r.name}</td>
-      <td>${r.distance_m?.toFixed(1) || 0}</td>
-      <td>${paceMinKm}</td>
-      <td>${speedKmh}</td>
-      <td>${r.last_update ? timeAgo(r.last_update) : "-"}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
 setInterval(updateLeaderboard, 5000);
 
-// ------------------------------------------------------------
-// WEBSOCKET
-// ------------------------------------------------------------
 window.socket = new WebSocket(WS_URL);
 
 window.socket.onopen = () => console.log("✅ WS connected");
 window.socket.onerror = (e) => console.error("❌ WS error", e);
 window.socket.onclose = () => console.warn("⚠️ WS closed");
 
-window.socket.onmessage = (event) => {
+window.socket.onmessage = (e) => {
   try {
-    const msg = JSON.parse(event.data);
+    const msg = JSON.parse(e.data);
     console.log("📡 Raw WS message:", msg);
 
-    // Handle by type
-    switch (msg.type) {
-      case "info":
-      case "ping":
-        console.log("ℹ️", msg.message || msg.type);
-        return;
+    // Ignore server pings or info
+    if (msg.type === "ping" || msg.type === "info") return;
 
-      case "leaderboard_snapshot":
-      case "leaderboard_update":
-        (msg.data || []).forEach((r) => {
-          window.runnerData[r.runner_id] = {
-            ...window.runnerData[r.runner_id],
-            ...r,
-            last_update: Date.now(),
-          };
-        });
-        updateLeaderboard();
-        return;
-
-      case "race_update":
-        const data = msg.message;
-        if (!data) return console.warn("⚠️ Empty race_update message", msg);
-
-        const lat = parseFloat(data.lat);
-        const lon = parseFloat(data.lon);
-        if (isNaN(lat) || isNaN(lon)) {
-          console.warn("⚠️ Invalid lat/lon:", data);
-          return;
-        }
-
-        const id = data.runner_id;
-        const name = data.name || `Runner ${id}`;
-        const newPos = [lat, lon];
-
-        if (!window.markers[id]) {
-          window.markers[id] = L.marker(newPos).addTo(window.map).bindPopup(name);
-          window.map.setView(newPos, 14);
-          console.log(`📍 Created marker for ${name}`);
+    // Handle leaderboard snapshots (no coords)
+    if (msg.type === "leaderboard_snapshot" || msg.type === "leaderboard_update") {
+      msg.data.forEach((runner) => {
+        if (!window.runnerData[runner.runner_id]) {
+          window.runnerData[runner.runner_id] = { ...runner, last_update: Date.now() };
         } else {
-          const cur = window.markers[id].getLatLng();
-          moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], newPos, 900);
-          window.markers[id].bindPopup(`${name}<br>${data.timestamp}`);
+          Object.assign(window.runnerData[runner.runner_id], runner);
         }
-
-        window.runnerData[id] = {
-          ...window.runnerData[id],
-          ...data,
-          name,
-          last_update: Date.now(),
-        };
-        updateLeaderboard();
-        return;
-
-      default:
-        console.warn("⚠️ Unknown message type:", msg);
-        return;
+      });
+      updateLeaderboard();
+      return;
     }
+
+    // Handle race updates with coordinates
+    const data = msg.message || msg;
+    if (!data.lat || !data.lon) {
+      console.warn("⚠️ Skipping message without lat/lon:", data);
+      return;
+    }
+
+    const id = data.runner_id;
+    const name = data.name || `Runner ${id}`;
+    const newPos = [parseFloat(data.lat), parseFloat(data.lon)];
+
+    // Place or move marker
+    if (!window.markers[id]) {
+      window.markers[id] = L.marker(newPos).addTo(window.map).bindPopup(name);
+      console.log(`📍 Created marker for ${name} (${newPos})`);
+    } else {
+      const cur = window.markers[id].getLatLng();
+      moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], newPos, 800);
+    }
+
+    // Update popup info
+    window.markers[id].bindPopup(
+      `${name}<br>${data.distance_m.toFixed(1)} m<br>Pace: ${
+        data.pace_min_km?.toFixed(1) || "-"
+      } min/km<br>${data.timestamp}`
+    );
+
+    // Update data for leaderboard
+    window.runnerData[id] = {
+      ...window.runnerData[id],
+      ...data,
+      name,
+      last_update: Date.now(),
+    };
+
+    updateLeaderboard();
   } catch (err) {
     console.error("❌ WS parse error:", err);
   }
 };
 
-// ------------------------------------------------------------
-// SIMULATION
-// ------------------------------------------------------------
 window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
   const fake = {
     type: "race_update",
@@ -170,13 +141,13 @@ window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
       lat,
       lon,
       distance_m: Math.random() * 1000,
-      pace_min_km: (4 + Math.random() * 2).toFixed(2),
-      speed_kmh: (8 + Math.random() * 3).toFixed(2),
+      pace_min_km: 5 + Math.random() * 2,
+      speed_kmh: 10 + Math.random() * 5,
       timestamp: new Date().toLocaleTimeString(),
     },
   };
-  console.log("🧪 Simulating:", fake);
+  console.log("🧪 Simulating runner:", fake);
   window.socket.onmessage({ data: JSON.stringify(fake) });
 };
 
-console.log("🧪 simulateRunner(lat,lon,id,name) ready");
+console.log("🧪 simulateRunner() ready");
