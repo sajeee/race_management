@@ -46,18 +46,9 @@ def dashboard(request, race_id):
         "race": race,
         "runners": runner_data,
     })
-
-
+    
 @csrf_exempt
 def post_location(request, race_id):
-    """
-    Receives live GPS data from Android/Tasker and broadcasts updates:
-    {
-        "runner_id": 1,
-        "latitude": 33.6844,
-        "longitude": 73.0479
-    }
-    """
     if request.method != "POST":
         return JsonResponse({"error": "POST only"}, status=405)
 
@@ -75,7 +66,6 @@ def post_location(request, race_id):
         location = Point(float(lon), float(lat))
         timestamp = timezone.now()
 
-        # Previous tracking point
         prev = (
             TrackingPoint.objects.filter(runner=runner, race=race)
             .order_by("-timestamp")
@@ -87,15 +77,14 @@ def post_location(request, race_id):
             prev_coords = (prev.location.y, prev.location.x)
             curr_coords = (float(lat), float(lon))
             dist_m = geodesic(prev_coords, curr_coords).meters
-            if dist_m >= 3:  # ignore GPS noise
+            if dist_m >= 3:
                 incremental_distance = dist_m
 
-        # Save new point
         tp = TrackingPoint.objects.create(
             runner=runner, race=race, location=location, timestamp=timestamp
         )
 
-        # Compute total distance + pace
+        # Total distance and pace
         points = (
             TrackingPoint.objects.filter(runner=runner, race=race)
             .order_by("timestamp")
@@ -115,26 +104,46 @@ def post_location(request, race_id):
                     total_time += (time - prev_time).total_seconds()
             prev_point, prev_time = loc, time
 
-        pace_spm = (total_time / (total_distance / 1000)) if total_distance > 0 else 0
+        pace_min_km = (total_time / 60) / (total_distance / 1000) if total_distance > 0 else 0
+        speed_kmh = (total_distance / total_time) * 3.6 if total_time > 0 else 0
 
-        # Prepare WebSocket broadcast message
         message = {
             "runner_id": runner.id,
             "name": f"{runner.first_name} {runner.last_name}",
             "lat": float(lat),
             "lon": float(lon),
-            "distance_m": round(total_distance, 2),
-            "pace_spm": round(pace_spm, 1) if pace_spm else None,
+            "distance_m": round(total_distance, 1),
+            "pace_min_km": round(pace_min_km, 2),
+            "speed_kmh": round(speed_kmh, 2),
             "timestamp": tp.timestamp.strftime("%H:%M:%S"),
         }
 
-        print("📡 Broadcasting message:", message)
-
-        # Broadcast to live dashboard
+        # Broadcast to race group
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"race_{race_id}",
             {"type": "race_update", "message": message},
+        )
+
+        # Leaderboard broadcast
+        leaderboard = []
+        runners = Runner.objects.filter(id__in=TrackingPoint.objects.filter(race=race).values_list("runner_id", flat=True))
+        for r in runners:
+            pts = TrackingPoint.objects.filter(runner=r, race=race).order_by("timestamp").values_list("location", "timestamp")
+            td = 0.0
+            prev_p, prev_t = None, None
+            for loc, t in pts:
+                if prev_p:
+                    seg = geodesic((prev_p.y, prev_p.x), (loc.y, loc.x)).meters
+                    if seg >= 3:
+                        td += seg
+                prev_p, prev_t = loc, t
+            leaderboard.append({"runner_id": r.id, "name": f"{r.first_name} {r.last_name}", "distance_m": round(td, 1)})
+
+        leaderboard.sort(key=lambda x: x["distance_m"], reverse=True)
+        async_to_sync(channel_layer.group_send)(
+            f"race_{race_id}",
+            {"type": "leaderboard_update", "message": {"leaderboard": leaderboard}},
         )
 
         return JsonResponse({"status": "ok", "data": message})
@@ -142,6 +151,7 @@ def post_location(request, race_id):
     except Exception as e:
         print("❌ post_location error:", str(e))
         return JsonResponse({"error": str(e)}, status=500)
+
 @require_GET
 def get_latest_locations(request, race_id):
     """
