@@ -1,8 +1,8 @@
-console.log("🚀 Diagnostic dashboard.js loaded");
+console.log("🚀 Final dashboard.js loaded");
 
-// =============================================================
-// CONFIGURATION
-// =============================================================
+// ------------------------------------------------------------
+// CONFIG
+// ------------------------------------------------------------
 const WS_PROTO = window.location.protocol === "https:" ? "wss" : "ws";
 const WS_URL = `${WS_PROTO}://${window.location.host}/ws/race/${window.RACE_ID}/`;
 console.log("🌐 WebSocket URL:", WS_URL);
@@ -10,9 +10,9 @@ console.log("🌐 WebSocket URL:", WS_URL);
 window.runnerData = {};
 window.markers = {};
 
-// =============================================================
-// MAP INITIALIZATION
-// =============================================================
+// ------------------------------------------------------------
+// MAP INIT
+// ------------------------------------------------------------
 (function initMap() {
   const el = document.getElementById("map");
   if (!el) return console.error("❌ #map missing");
@@ -24,9 +24,9 @@ window.markers = {};
   console.log("🗺️ Map initialized");
 })();
 
-// =============================================================
-// HELPER FUNCTIONS
-// =============================================================
+// ------------------------------------------------------------
+// HELPERS
+// ------------------------------------------------------------
 function moveMarkerSmooth(marker, fromLatLng, toLatLng, duration = 1000) {
   const start = Date.now();
   const from = { lat: fromLatLng[0], lng: fromLatLng[1] };
@@ -49,9 +49,6 @@ function timeAgo(ts) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-// =============================================================
-// LEADERBOARD RENDERING
-// =============================================================
 function updateLeaderboard() {
   const tbody = document.querySelector("#leaderboard tbody");
   if (!tbody) return;
@@ -62,17 +59,12 @@ function updateLeaderboard() {
     return;
   }
 
-  // sort by distance descending
   runners.sort((a, b) => (b.distance_m || 0) - (a.distance_m || 0));
-
   tbody.innerHTML = "";
+
   runners.forEach((r, i) => {
-    const pace_min_km = r.pace_spm ? (r.pace_spm / 60).toFixed(2) : "-";
-    const speed_kmh = r.speed_kmh
-      ? r.speed_kmh.toFixed(2)
-      : r.pace_spm
-      ? (3600 / r.pace_spm).toFixed(2)
-      : "-";
+    const paceMinKm = r.pace_min_km ? r.pace_min_km.toFixed(2) : "-";
+    const speedKmh = r.speed_kmh ? r.speed_kmh.toFixed(2) : "-";
 
     const tr = document.createElement("tr");
     tr.dataset.id = r.runner_id;
@@ -81,8 +73,8 @@ function updateLeaderboard() {
       <td>${r.runner_id}</td>
       <td>${r.name}</td>
       <td>${r.distance_m?.toFixed(1) || 0}</td>
-      <td>${pace_min_km}</td>
-      <td>${speed_kmh}</td>
+      <td>${paceMinKm}</td>
+      <td>${speedKmh}</td>
       <td>${r.last_update ? timeAgo(r.last_update) : "-"}</td>
     `;
     tbody.appendChild(tr);
@@ -90,75 +82,85 @@ function updateLeaderboard() {
 }
 setInterval(updateLeaderboard, 5000);
 
-// =============================================================
-// WEBSOCKET CONNECTION
-// =============================================================
+// ------------------------------------------------------------
+// WEBSOCKET
+// ------------------------------------------------------------
 window.socket = new WebSocket(WS_URL);
 
 window.socket.onopen = () => console.log("✅ WS connected");
 window.socket.onerror = (e) => console.error("❌ WS error", e);
-window.socket.onclose = (e) => console.warn("⚠️ WS closed", e);
+window.socket.onclose = () => console.warn("⚠️ WS closed");
 
 window.socket.onmessage = (event) => {
   try {
     const msg = JSON.parse(event.data);
     console.log("📡 Raw WS message:", msg);
 
-    // skip connection message
-    if (msg.type === "info") {
-      console.log("ℹ️ Info message:", msg.message);
-      return;
+    // Handle by type
+    switch (msg.type) {
+      case "info":
+      case "ping":
+        console.log("ℹ️", msg.message || msg.type);
+        return;
+
+      case "leaderboard_snapshot":
+      case "leaderboard_update":
+        (msg.data || []).forEach((r) => {
+          window.runnerData[r.runner_id] = {
+            ...window.runnerData[r.runner_id],
+            ...r,
+            last_update: Date.now(),
+          };
+        });
+        updateLeaderboard();
+        return;
+
+      case "race_update":
+        const data = msg.message;
+        if (!data) return console.warn("⚠️ Empty race_update message", msg);
+
+        const lat = parseFloat(data.lat);
+        const lon = parseFloat(data.lon);
+        if (isNaN(lat) || isNaN(lon)) {
+          console.warn("⚠️ Invalid lat/lon:", data);
+          return;
+        }
+
+        const id = data.runner_id;
+        const name = data.name || `Runner ${id}`;
+        const newPos = [lat, lon];
+
+        if (!window.markers[id]) {
+          window.markers[id] = L.marker(newPos).addTo(window.map).bindPopup(name);
+          window.map.setView(newPos, 14);
+          console.log(`📍 Created marker for ${name}`);
+        } else {
+          const cur = window.markers[id].getLatLng();
+          moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], newPos, 900);
+          window.markers[id].bindPopup(`${name}<br>${data.timestamp}`);
+        }
+
+        window.runnerData[id] = {
+          ...window.runnerData[id],
+          ...data,
+          name,
+          last_update: Date.now(),
+        };
+        updateLeaderboard();
+        return;
+
+      default:
+        console.warn("⚠️ Unknown message type:", msg);
+        return;
     }
-
-    const data = msg.message || msg;
-    const lat = parseFloat(data.lat ?? data.latitude);
-    const lon = parseFloat(data.lon ?? data.lng ?? data.longitude);
-
-    if (isNaN(lat) || isNaN(lon)) {
-      console.warn("⚠️ Invalid coordinates in:", data);
-      return;
-    }
-
-    const id = data.runner_id;
-    const name = data.name || `Runner ${id}`;
-    const newPos = [lat, lon];
-
-    // Marker create/move
-    if (!window.markers[id]) {
-      window.markers[id] = L.marker(newPos).addTo(window.map).bindPopup(name);
-      window.map.setView(newPos, 14);
-      console.log(`📍 New marker for ${name}`);
-    } else {
-      const cur = window.markers[id].getLatLng();
-      moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], newPos, 900);
-      window.markers[id].bindPopup(`${name}<br>${data.timestamp}`);
-    }
-
-    // store data
-    window.runnerData[id] = {
-      ...window.runnerData[id],
-      ...data,
-      name,
-      last_update: Date.now(),
-    };
-
-    // flash leaderboard row
-    const row = document.querySelector(`#leaderboard tr[data-id="${id}"]`);
-    if (row) {
-      row.style.transition = "background 0.5s";
-      row.style.background = "yellow";
-      setTimeout(() => (row.style.background = ""), 800);
-    }
-
-    updateLeaderboard();
   } catch (err) {
-    console.error("❌ WS parse error", err);
+    console.error("❌ WS parse error:", err);
   }
 };
 
-// =============================================================
-// DEBUGGING TOOLS
-// =============================================================
+// ------------------------------------------------------------
+// SIMULATION
+// ------------------------------------------------------------
 window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
   const fake = {
     type: "race_update",
@@ -167,8 +169,9 @@ window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
       name,
       lat,
       lon,
-      distance_m: Math.random() * 5000,
-      pace_spm: 360 + Math.random() * 60,
+      distance_m: Math.random() * 1000,
+      pace_min_km: (4 + Math.random() * 2).toFixed(2),
+      speed_kmh: (8 + Math.random() * 3).toFixed(2),
       timestamp: new Date().toLocaleTimeString(),
     },
   };
