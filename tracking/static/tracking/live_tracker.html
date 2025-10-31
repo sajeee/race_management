@@ -1,97 +1,44 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Live Runner Tracker</title>
-  <style>
-    body {
-      font-family: Arial;
-      text-align: center;
-      margin-top: 40px;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 18px;
-    }
-    #log {
-      margin-top: 20px;
-      font-family: monospace;
-      text-align: left;
-      max-width: 500px;
-      margin-inline: auto;
-    }
-  </style>
+  <meta charset="utf-8"><title>Live Tracker</title>
 </head>
 <body>
-  <h1>🏃 Live GPS Tracker</h1>
-  <p>Tap "Start Tracking" to stream your location to the live dashboard.</p>
-
-  <label>Runner ID: <input id="runnerId" type="number" value="1"></label><br><br>
-  <label>Race ID: <input id="raceId" type="number" value="1"></label><br><br>
-  <button id="startBtn">▶️ Start Tracking</button>
-  <button id="stopBtn" disabled>⏹ Stop</button>
-
+  <h3>Live Tracker</h3>
+  Runner ID: <input id="runner" value="1"><br>
+  Race ID: <input id="race" value="1"><br>
+  <button id="start">Start</button>
+  <button id="stop" disabled>Stop</button>
   <pre id="log"></pre>
-
   <script>
-    let watchId = null;
-
-    function log(msg) {
-      const el = document.getElementById("log");
-      el.textContent += msg + "\n";
-      el.scrollTop = el.scrollHeight;
-    }
-
-    async function sendLocation(lat, lon) {
-      const runnerId = document.getElementById("runnerId").value;
-      const raceId = document.getElementById("raceId").value;
-      const url = `https://web-production-58a8f.up.railway.app/tracking/api/tracking/${raceId}/post_location/`;
-
-      const data = { runner_id: runnerId, latitude: lat, longitude: lon };
-
-      try {
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        });
-        const json = await res.json();
-        log(`✅ Sent: ${lat.toFixed(5)}, ${lon.toFixed(5)} (${json.status})`);
-      } catch (err) {
-        log(`❌ Error: ${err}`);
-      }
-    }
-
-    document.getElementById("startBtn").onclick = () => {
-      if (!navigator.geolocation) {
-        alert("Geolocation not supported!");
-        return;
-      }
-
-      document.getElementById("startBtn").disabled = true;
-      document.getElementById("stopBtn").disabled = false;
-      log("📡 Tracking started...");
-
-      watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-          const lat = pos.coords.latitude;
-          const lon = pos.coords.longitude;
-          sendLocation(lat, lon);
+    let watch = null;
+    const log = msg => { document.getElementById('log').textContent += msg + "\\n"; }
+    document.getElementById('start').onclick = () => {
+      const r = document.getElementById('runner').value;
+      const race = document.getElementById('race').value;
+      const url = `https://web-production-58a8f.up.railway.app/tracking/api/tracking/${race}/post_location/`;
+      if (!navigator.geolocation) return alert('Geolocation not supported');
+      watch = navigator.geolocation.watchPosition(
+        pos => {
+          fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ runner_id: Number(r), latitude: pos.coords.latitude, longitude: pos.coords.longitude })
+          }).then(r => r.json()).then(j => log('sent: ' + pos.coords.latitude + ',' + pos.coords.longitude + ' -> ' + JSON.stringify(j))).catch(e => log('err ' + e));
         },
-        (err) => log(`⚠️ ${err.message}`),
-        { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+        err => log('geo error: ' + err.message),
+        { enableHighAccuracy: true, maximumAge: 1000 }
       );
+      document.getElementById('start').disabled = true;
+      document.getElementById('stop').disabled = false;
+      log('📡 Tracking started');
     };
-
-    document.getElementById("stopBtn").onclick = () => {
-      if (watchId) {
-        navigator.geolocation.clearWatch(watchId);
-        log("⏹ Tracking stopped.");
-        document.getElementById("startBtn").disabled = false;
-        document.getElementById("stopBtn").disabled = true;
-      }
+    document.getElementById('stop').onclick = () => {
+      if (watch) navigator.geolocation.clearWatch(watch);
+      document.getElementById('start').disabled = false;
+      document.getElementById('stop').disabled = true;
+      log('⏹ stopped');
     };
   </script>
 </body>
 </html>
-
