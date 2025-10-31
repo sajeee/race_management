@@ -1,69 +1,101 @@
-console.log("🚀 dashboard.js LOADED (live-safe version)");
+console.log("🚀 dashboard.js LOADED");
 
+// ------------------------------------------------------------
+// CONFIG
+// ------------------------------------------------------------
 const WS_PROTO = window.location.protocol === "https:" ? "wss" : "ws";
 const WS_URL = `${WS_PROTO}://${window.location.host}/ws/race/${window.RACE_ID}/`;
 console.log("🌐 WebSocket URL:", WS_URL);
 
-window.map = L.map("map").setView([31.5204, 74.3587], 13);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-  attribution: "&copy; OpenStreetMap contributors",
-}).addTo(window.map);
+// ------------------------------------------------------------
+// MAP INITIALIZATION
+// ------------------------------------------------------------
+(function initMap() {
+  try {
+    const el = document.getElementById("map");
+    if (!el) return console.error("❌ #map element missing");
+
+    window.map = L.map(el).setView([31.5204, 74.3587], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(window.map);
+
+    console.log("🗺️ Leaflet map initialized");
+  } catch (err) {
+    console.error("❌ Map init error:", err);
+  }
+})();
 
 window.markers = {};
-window.runnerData = {};
+window.runnerData = {}; // memory store for all runners
 
+// ------------------------------------------------------------
+// HELPER: Smooth Marker Movement
+// ------------------------------------------------------------
 function moveMarkerSmooth(marker, fromLatLng, toLatLng, duration = 1000) {
   const start = Date.now();
-  const from = { lat: fromLatLng[0], lng: fromLatLng[1] };
-  const to = { lat: toLatLng[0], lng: toLatLng[1] };
   function animate() {
     const now = Date.now();
     const t = Math.min(1, (now - start) / duration);
-    const lat = from.lat + (to.lat - from.lat) * t;
-    const lng = from.lng + (to.lng - from.lng) * t;
-    marker.setLatLng([lat, lng]);
+    const lat = fromLatLng[0] + (toLatLng[0] - fromLatLng[0]) * t;
+    const lon = fromLatLng[1] + (toLatLng[1] - fromLatLng[1]) * t;
+    marker.setLatLng([lat, lon]);
     if (t < 1) requestAnimationFrame(animate);
   }
   requestAnimationFrame(animate);
 }
 
+// ------------------------------------------------------------
+// HELPER: Update Leaderboard
+// ------------------------------------------------------------
 function updateLeaderboard() {
   const tbody = document.querySelector("#leaderboard tbody");
   if (!tbody) return;
 
   const runners = Object.values(window.runnerData);
+  if (!runners.length) {
+    tbody.innerHTML = `<tr><td colspan="7">Waiting for runners...</td></tr>`;
+    return;
+  }
+
   runners.sort((a, b) => (b.distance_m || 0) - (a.distance_m || 0));
 
   tbody.innerHTML = "";
-  runners.forEach((r, index) => {
-    const medal = ["🥇", "🥈", "🥉"][index] || "";
-    const pace = r.pace_min_km ? r.pace_min_km.toFixed(1) : "-";
-    const speed = r.speed_kmh ? r.speed_kmh.toFixed(1) : "-";
-    const ago = r.last_update ? timeAgo(r.last_update) : "-";
+  runners.forEach((r, i) => {
+    const speed = r.speed_kmh ? r.speed_kmh.toFixed(2) : "-";
+    const pace = r.pace_min_km ? r.pace_min_km.toFixed(2) : "-";
+    const last = r.last_update ? timeAgo(r.last_update) : "-";
+
+    const medal = ["🥇", "🥈", "🥉"][i] || "";
 
     tbody.innerHTML += `
       <tr data-id="${r.runner_id}">
-        <td>${index + 1}</td>
+        <td>${i + 1}</td>
         <td>${r.runner_id}</td>
         <td>${medal} ${r.name}</td>
         <td>${r.distance_m?.toFixed(1) || 0}</td>
         <td>${pace}</td>
         <td>${speed}</td>
-        <td>${ago}</td>
+        <td>${last}</td>
       </tr>`;
   });
 }
 
+// ------------------------------------------------------------
+// HELPER: Relative Time
+// ------------------------------------------------------------
 function timeAgo(ts) {
   const diff = (Date.now() - ts) / 1000;
   if (diff < 60) return `${Math.floor(diff)}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   return `${Math.floor(diff / 3600)}h ago`;
 }
-
 setInterval(updateLeaderboard, 5000);
 
+// ------------------------------------------------------------
+// WEBSOCKET HANDLER
+// ------------------------------------------------------------
 window.socket = new WebSocket(WS_URL);
 
 window.socket.onopen = () => console.log("✅ WS connected");
@@ -75,50 +107,40 @@ window.socket.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     console.log("📡 Raw WS message:", msg);
 
-    // Ignore server pings or info
-    if (msg.type === "ping" || msg.type === "info") return;
+    if (msg.type === "info" || msg.type === "ping") return;
 
-    // Handle leaderboard snapshots (no coords)
+    // ✅ Handle leaderboard snapshot/update separately (no lat/lon)
     if (msg.type === "leaderboard_snapshot" || msg.type === "leaderboard_update") {
-      msg.data.forEach((runner) => {
-        if (!window.runnerData[runner.runner_id]) {
-          window.runnerData[runner.runner_id] = { ...runner, last_update: Date.now() };
-        } else {
-          Object.assign(window.runnerData[runner.runner_id], runner);
-        }
+      (msg.data || []).forEach((r) => {
+        window.runnerData[r.runner_id] = {
+          ...(window.runnerData[r.runner_id] || {}),
+          ...r,
+        };
       });
       updateLeaderboard();
       return;
     }
 
-    // Handle race updates with coordinates
+    // ✅ Handle location updates (race_update)
     const data = msg.message || msg;
-    if (!data.lat || !data.lon) {
-      console.warn("⚠️ Skipping message without lat/lon:", data);
-      return;
-    }
+    const lat = parseFloat(data.lat ?? data.latitude);
+    const lon = parseFloat(data.lon ?? data.lng ?? data.longitude);
+    if (isNaN(lat) || isNaN(lon)) return; // skip invalid coords
 
-    const id = data.runner_id;
+    const id = data.runner_id || "unknown";
     const name = data.name || `Runner ${id}`;
-    const newPos = [parseFloat(data.lat), parseFloat(data.lon)];
+    const pos = [lat, lon];
 
-    // Place or move marker
+    // Create or move marker
     if (!window.markers[id]) {
-      window.markers[id] = L.marker(newPos).addTo(window.map).bindPopup(name);
-      console.log(`📍 Created marker for ${name} (${newPos})`);
+      window.markers[id] = L.marker(pos).addTo(window.map).bindPopup(name);
+      console.log(`📍 Created marker for ${name}`);
     } else {
       const cur = window.markers[id].getLatLng();
-      moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], newPos, 800);
+      moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], pos);
     }
 
-    // Update popup info
-    window.markers[id].bindPopup(
-      `${name}<br>${data.distance_m.toFixed(1)} m<br>Pace: ${
-        data.pace_min_km?.toFixed(1) || "-"
-      } min/km<br>${data.timestamp}`
-    );
-
-    // Update data for leaderboard
+    // Update runner data
     window.runnerData[id] = {
       ...window.runnerData[id],
       ...data,
@@ -132,6 +154,9 @@ window.socket.onmessage = (e) => {
   }
 };
 
+// ------------------------------------------------------------
+// SIMULATE RUNNER (for debugging)
+// ------------------------------------------------------------
 window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
   const fake = {
     type: "race_update",
@@ -140,9 +165,9 @@ window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
       name,
       lat,
       lon,
-      distance_m: Math.random() * 1000,
-      pace_min_km: 5 + Math.random() * 2,
-      speed_kmh: 10 + Math.random() * 5,
+      distance_m: Math.random() * 500,
+      pace_min_km: 5 + Math.random() * 3,
+      speed_kmh: 10 + Math.random() * 2,
       timestamp: new Date().toLocaleTimeString(),
     },
   };
