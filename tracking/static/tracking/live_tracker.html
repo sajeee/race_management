@@ -45,7 +45,7 @@
     async function sendLocation(lat, lon) {
       const runnerId = document.getElementById("runnerId").value;
       const raceId = document.getElementById("raceId").value;
-      const url = `https://web-production-58a8f.up.railway.app/api/tracking/${raceId}/post_location/`;
+      const url = `https://web-production-58a8f.up.railway.app/tracking/api/tracking/${raceId}/post_location/`;
 
       const data = { runner_id: runnerId, latitude: lat, longitude: lon };
 
@@ -94,3 +94,4 @@
   </script>
 </body>
 </html>
+
