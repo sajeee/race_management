@@ -3,64 +3,104 @@ import json
 import asyncio
 from datetime import datetime
 from channels.generic.websocket import AsyncWebsocketConsumer
+from asgiref.sync import sync_to_async
+from tracking.models import TrackingPoint
+from registration.models import Runner
+from core.models import Race
+from geopy.distance import geodesic
+
 
 class RaceTrackerConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.race_id = self.scope['url_route']['kwargs']['race_id']
+        self.race_id = self.scope["url_route"]["kwargs"]["race_id"]
         self.group_name = f"race_{self.race_id}"
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
-        # send connection confirmation
-        await self.send_json({
-            "type": "info",
-            "message": f"✅ Connected to race {self.race_id}",
-            "timestamp": datetime.utcnow().isoformat()
-        })
-        print(f"📡 WebSocket connected: {self.group_name}")
+        # confirmation
+        await self.send_json({"type": "info", "message": f"✅ Connected to race {self.race_id}", "timestamp": datetime.utcnow().isoformat()})
 
-        # Start keep-alive ping loop
-        self.keepalive_task = asyncio.create_task(self.keep_alive())
+        # send a leaderboard snapshot when a client connects
+        leaderboard = await sync_to_async(self._build_leaderboard_snapshot)()
+        await self.send_json({"type": "leaderboard_snapshot", "data": leaderboard})
+
+        # start keepalive loop to avoid proxy idling
+        self.keepalive_task = asyncio.create_task(self._keepalive())
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
         if hasattr(self, "keepalive_task"):
             self.keepalive_task.cancel()
-        print(f"⚠️ WebSocket disconnected: {self.group_name}")
-
-    async def keep_alive(self):
-        """Send periodic ping messages to prevent Railway/Heroku timeout."""
-        try:
-            while True:
-                await asyncio.sleep(25)  # every 25 seconds
-                await self.send_json({"type": "ping", "timestamp": datetime.utcnow().isoformat()})
-        except asyncio.CancelledError:
-            pass
 
     async def receive(self, text_data):
-        """Handle messages from the dashboard (for simulation/testing)."""
+        """
+        Receive messages from client dashboards (we use it to acknowledge pings or allow simulate messages).
+        """
         try:
             data = json.loads(text_data)
-            if data.get("type") == "simulate":
-                await self.channel_layer.group_send(
-                    self.group_name,
-                    {"type": "race_update", "message": data["message"]}
-                )
-                print("🧪 Simulated update:", data["message"])
-        except Exception as e:
-            print("❌ receive() error:", e)
+            if data.get("type") == "ping":
+                # reply with pong
+                await self.send_json({"type": "pong", "time": data.get("time")})
+            elif data.get("type") == "simulate":
+                # client-side simulator can request a broadcast
+                await self.channel_layer.group_send(self.group_name, {"type": "race_update", "message": data.get("message", {})})
+        except Exception:
+            pass
 
     async def race_update(self, event):
-        """Send live updates from backend to dashboard."""
-        msg = event.get("message", {})
-        if "timestamp" not in msg:
-            msg["timestamp"] = datetime.utcnow().strftime("%H:%M:%S")
-        await self.send_json(msg)
+        """
+        Called when post_location broadcasts an update.
+        Message will be under event['message'].
+        """
+        message = event.get("message", {})
+        if "timestamp" not in message:
+            message["timestamp"] = datetime.utcnow().strftime("%H:%M:%S")
+        await self.send_json({"type": "race_update", "message": message})
+
+    async def leaderboard_update(self, event):
+        """Pass leaderboard changes to clients"""
+        leaderboard = event.get("leaderboard", [])
+        await self.send_json({"type": "leaderboard_update", "data": leaderboard})
 
     async def send_json(self, data):
-        """Helper for safe JSON transmission."""
+        # small wrapper to ensure robust JSON sending
         try:
             await self.send(text_data=json.dumps(data))
         except Exception as e:
             print("❌ send_json error:", str(e))
+
+    async def _keepalive(self):
+        """Periodically send a ping message to keep connection alive behind proxies."""
+        try:
+            while True:
+                await asyncio.sleep(25)
+                await self.send_json({"type": "ping", "timestamp": datetime.utcnow().isoformat()})
+        except asyncio.CancelledError:
+            pass
+
+    def _build_leaderboard_snapshot(self):
+        """Synchronous helper to build leaderboard snapshot (used on connect)."""
+        try:
+            race = Race.objects.get(id=self.race_id)
+            runner_ids = TrackingPoint.objects.filter(race=race).values_list("runner_id", flat=True).distinct()
+            runners = Runner.objects.filter(id__in=runner_ids)
+
+            leaderboard = []
+            for runner in runners:
+                pts = TrackingPoint.objects.filter(runner=runner, race=race).order_by("timestamp").values_list("location", "timestamp")
+                td = 0.0
+                prev_p, prev_t = None, None
+                for loc, t in pts:
+                    if prev_p:
+                        seg = geodesic((prev_p.y, prev_p.x), (loc.y, loc.x)).meters
+                        if seg >= 3:
+                            td += seg
+                    prev_p, prev_t = loc, t
+                leaderboard.append({"runner_id": runner.id, "name": f"{runner.first_name} {runner.last_name}", "distance_m": round(td, 1)})
+
+            leaderboard.sort(key=lambda x: x["distance_m"], reverse=True)
+            return leaderboard
+        except Exception as e:
+            print("❌ leaderboard snapshot error:", str(e))
+            return []
