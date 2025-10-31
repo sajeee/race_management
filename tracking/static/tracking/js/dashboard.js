@@ -1,4 +1,3 @@
-// static/tracking/js/dashboard.js
 console.log("🚀 Enhanced dashboard.js loaded");
 
 // ------------------------------------------------------------
@@ -7,9 +6,6 @@ console.log("🚀 Enhanced dashboard.js loaded");
 const WS_PROTO = window.location.protocol === "https:" ? "wss" : "ws";
 const WS_URL = `${WS_PROTO}://${window.location.host}/ws/race/${window.RACE_ID}/`;
 console.log("🌐 WebSocket URL:", WS_URL);
-
-window.markers = {};
-window.runnerData = JSON.parse(localStorage.getItem("runnerData") || "{}"); // persistent data
 
 // ------------------------------------------------------------
 // MAP INITIALIZATION
@@ -25,42 +21,25 @@ window.runnerData = JSON.parse(localStorage.getItem("runnerData") || "{}"); // p
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(window.map);
 
-    console.log("🗺️ Leaflet map initialized");
+    console.log("🗺️ Map ready");
   } catch (err) {
     console.error("Map init failed:", err);
   }
 })();
 
-// restore saved markers if any (show quickly)
-(function restoreSavedMarkers() {
-  try {
-    const saved = window.runnerData || {};
-    Object.keys(saved).forEach(id => {
-      const r = saved[id];
-      if (r.lat && r.lon) {
-        if (!window.markers[id]) {
-          window.markers[id] = L.marker([parseFloat(r.lat), parseFloat(r.lon)])
-            .addTo(window.map)
-            .bindPopup(r.name || `Runner ${id}`);
-        }
-      }
-    });
-    updateLeaderboard();
-  } catch (e) {
-    console.warn("restoreSavedMarkers error", e);
-  }
-})();
+window.markers = {};
+window.runnerData = {}; // store all runner data centrally
 
 // ------------------------------------------------------------
-// SMOOTH MARKER MOVEMENT
+// SMOOTH MOVEMENT
 // ------------------------------------------------------------
 function moveMarkerSmooth(marker, fromLatLng, toLatLng, duration = 1000) {
   const start = Date.now();
   const from = { lat: fromLatLng[0], lng: fromLatLng[1] };
   const to = { lat: toLatLng[0], lng: toLatLng[1] };
-
   function animate() {
-    const t = Math.min(1, (Date.now() - start) / duration);
+    const now = Date.now();
+    const t = Math.min(1, (now - start) / duration);
     const lat = from.lat + (to.lat - from.lat) * t;
     const lng = from.lng + (to.lng - from.lng) * t;
     marker.setLatLng([lat, lng]);
@@ -70,49 +49,53 @@ function moveMarkerSmooth(marker, fromLatLng, toLatLng, duration = 1000) {
 }
 
 // ------------------------------------------------------------
-// LEADERBOARD
+// LEADERBOARD UPDATE + SORT
 // ------------------------------------------------------------
 function updateLeaderboard() {
   const tbody = document.querySelector("#leaderboard tbody");
   if (!tbody) return;
 
   const runners = Object.values(window.runnerData);
+
+  // Sort by distance (descending)
   runners.sort((a, b) => (b.distance_m || 0) - (a.distance_m || 0));
 
+  // Clear existing rows
   tbody.innerHTML = "";
-  if (runners.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">Waiting for runners...</td></tr>`;
-    return;
-  }
 
   runners.forEach((r, index) => {
     const tr = document.createElement("tr");
     tr.dataset.id = r.runner_id;
 
+    // Medal emoji for top 3
     let medal = "";
     if (index === 0) medal = "🥇";
     else if (index === 1) medal = "🥈";
     else if (index === 2) medal = "🥉";
 
-    const paceMinKm = r.pace_min_km ? Number(r.pace_min_km).toFixed(2) : "-";
-    const speedKmh = r.speed_kmh ? Number(r.speed_kmh).toFixed(2) : (r.pace_spm ? (3600 / r.pace_spm).toFixed(2) : "-");
+    // Speed (km/h)
+    const speedKmh =
+      r.pace_spm && r.pace_spm > 0 ? (3600 / r.pace_spm).toFixed(1) : "-";
+
+    // Last update (relative)
     const ago = r.last_update ? timeAgo(r.last_update) : "-";
 
     tr.innerHTML = `
       <td>${index + 1}</td>
       <td>${r.runner_id}</td>
       <td>${medal} ${r.name}</td>
-      <td>${(r.distance_m || 0).toFixed ? (r.distance_m || 0).toFixed(1) : (r.distance_m || 0)}</td>
-      <td>${paceMinKm}</td>
-      <td>${speedKmh}</td>
-      <td>${ago}</td>
+      <td class="distance">${r.distance_m?.toFixed(1) || 0}</td>
+      <td class="pace">${r.pace_spm?.toFixed(1) || "-"}</td>
+      <td class="speed">${speedKmh}</td>
+      <td class="ago">${ago}</td>
     `;
+
     tbody.appendChild(tr);
   });
 }
 
 // ------------------------------------------------------------
-// TIME UTILS
+// RELATIVE TIME HELPER
 // ------------------------------------------------------------
 function timeAgo(ts) {
   const diff = (Date.now() - ts) / 1000;
@@ -120,107 +103,76 @@ function timeAgo(ts) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   return `${Math.floor(diff / 3600)}h ago`;
 }
-setInterval(updateLeaderboard, 5000);
+setInterval(updateLeaderboard, 5000); // refresh "ago" every 5s
 
 // ------------------------------------------------------------
-// WEBSOCKET + PING + RECONNECT
+// WEBSOCKET HANDLER
 // ------------------------------------------------------------
-let socket;
-function setupWebSocket() {
-  socket = new WebSocket(WS_URL);
+window.socket = new WebSocket(WS_URL);
 
-  socket.onopen = () => {
-    console.log("✅ WS connected");
-    // send a ping immediately
-    socket.send(JSON.stringify({ type: "ping", time: Date.now() }));
-  };
+window.socket.onopen = () => console.log("✅ WS connected");
+window.socket.onerror = (e) => console.error("❌ WS error", e);
+window.socket.onclose = () => console.warn("⚠️ WS closed");
 
-  socket.onerror = (e) => console.error("❌ WS error", e);
-
-  socket.onclose = () => {
-    console.warn("⚠️ WS closed — reconnecting in 5s...");
-    setTimeout(setupWebSocket, 5000);
-  };
-
-  socket.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      console.log("📡 Raw WS message:", msg);
-
-      if (msg.type === "info") {
-        console.info(msg.message);
-        return;
-      }
-      if (msg.type === "ping") {
-        // optional: respond with pong if desired
-        socket.send(JSON.stringify({ type: "pong", time: Date.now() }));
-        return;
-      }
-      if (msg.type === "leaderboard_snapshot" || msg.type === "leaderboard_update") {
-        const list = msg.data || msg.data || msg.leaderboard || msg.data;
-        if (Array.isArray(list)) {
-          // normalize into runnerData
-          list.forEach(r => {
-            window.runnerData[r.runner_id] = {
-              ...window.runnerData[r.runner_id],
-              ...r,
-              last_update: window.runnerData[r.runner_id]?.last_update || Date.now(),
-            };
-          });
-          localStorage.setItem("runnerData", JSON.stringify(window.runnerData));
-          updateLeaderboard();
-        }
-        return;
-      }
-      if (msg.type === "race_update") {
-        const data = msg.message || msg;
-        const lat = parseFloat(data.lat ?? data.latitude);
-        const lon = parseFloat(data.lon ?? data.lng ?? data.longitude);
-        if (isNaN(lat) || isNaN(lon)) return;
-
-        const id = data.runner_id || data.id || "unknown";
-        const name = data.name || `Runner ${id}`;
-        const newPos = [lat, lon];
-
-        if (!window.markers[id]) {
-          window.markers[id] = L.marker(newPos).addTo(window.map).bindPopup(name);
-          window.map.setView(newPos, 14);
-        } else {
-          const cur = window.markers[id].getLatLng();
-          moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], newPos, 800);
-          window.markers[id].bindPopup(`${name}<br>${data.timestamp || "Now"}`);
-        }
-
-        window.runnerData[id] = {
-          ...window.runnerData[id],
-          ...data,
-          name,
-          last_update: Date.now(),
-        };
-
-        localStorage.setItem("runnerData", JSON.stringify(window.runnerData));
-        updateLeaderboard();
-      }
-    } catch (err) {
-      console.error("❌ WS parse error:", err);
-    }
-  };
-}
-setupWebSocket();
-
-// send periodic ping to keep proxy from idling connection
-setInterval(() => {
+window.socket.onmessage = (e) => {
   try {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "ping", time: Date.now() }));
+    const msg = JSON.parse(e.data);
+    console.log("📡 WS message:", msg);
+
+    if (msg.type === "info") return;
+
+    const data = msg.message || msg;
+    const lat = parseFloat(data.lat ?? data.latitude);
+    const lon = parseFloat(data.lon ?? data.lng ?? data.longitude);
+
+    if (isNaN(lat) || isNaN(lon)) {
+      console.warn("⚠️ Invalid coordinates in:", data);
+      return;
     }
-  } catch (e) {
-    console.warn("ping failed", e);
+
+    const id = data.runner_id || data.id || "unknown";
+    const name = data.name || `Runner ${id}`;
+    const newPos = [lat, lon];
+
+    // Update marker
+    if (!window.markers[id]) {
+      window.markers[id] = L.marker(newPos)
+        .addTo(window.map)
+        .bindPopup(name);
+      window.map.setView(newPos, 14);
+      console.log(`📍 Created marker for ${name}`);
+    } else {
+      const cur = window.markers[id].getLatLng();
+      moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], newPos, 800);
+      window.markers[id].bindPopup(
+        `${name}<br>${data.timestamp || "Just now"}`
+      );
+    }
+
+    // Save runner data
+    window.runnerData[id] = {
+      ...window.runnerData[id],
+      ...data,
+      name,
+      last_update: Date.now(),
+    };
+
+    // Highlight effect
+    const row = document.querySelector(`#leaderboard tr[data-id="${id}"]`);
+    if (row) {
+      row.style.transition = "background 0.5s";
+      row.style.background = "yellow";
+      setTimeout(() => (row.style.background = ""), 800);
+    }
+
+    updateLeaderboard();
+  } catch (err) {
+    console.error("❌ WS parse error:", err);
   }
-}, 25000);
+};
 
 // ------------------------------------------------------------
-// SIMULATE tool
+// SIMULATE RUNNER (testing helper)
 // ------------------------------------------------------------
 window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
   const fake = {
@@ -236,18 +188,7 @@ window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
     },
   };
   console.log("🧪 Simulating runner:", fake);
-  // simulate locally
-  const handler = () => {
-    const data = fake.message;
-    if (!window.markers[id]) {
-      window.markers[id] = L.marker([data.lat, data.lon]).addTo(window.map).bindPopup(data.name);
-    } else {
-      const cur = window.markers[id].getLatLng();
-      moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], [data.lat, data.lon], 800);
-    }
-    window.runnerData[id] = { ...window.runnerData[id], ...data, last_update: Date.now() };
-    localStorage.setItem("runnerData", JSON.stringify(window.runnerData));
-    updateLeaderboard();
-  };
-  handler();
+  window.socket.onmessage({ data: JSON.stringify(fake) });
 };
+console.log("🧪 simulateRunner() ready");
+
