@@ -1,7 +1,9 @@
 from django.contrib.gis.geos import Point
 from django.utils import timezone
+from django.db.models import Max
 from django.shortcuts import render, get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
 from django.http import JsonResponse
 from core.models import Race
 from registration.models import Runner
@@ -140,3 +142,33 @@ def post_location(request, race_id):
     except Exception as e:
         print("❌ post_location error:", str(e))
         return JsonResponse({"error": str(e)}, status=500)
+@require_GET
+def get_latest_locations(request, race_id):
+    """
+    Returns the most recent location per runner for this race.
+    Used by dashboard.js on page load (to restore data).
+    """
+    race = get_object_or_404(Race, id=race_id)
+    runner_ids = (
+        TrackingPoint.objects.filter(race=race)
+        .values_list("runner_id", flat=True)
+        .distinct()
+    )
+    runners = Runner.objects.filter(id__in=runner_ids)
+
+    data = []
+    for runner in runners:
+        last = (
+            TrackingPoint.objects.filter(runner=runner, race=race)
+            .order_by("-timestamp")
+            .first()
+        )
+        if last:
+            data.append({
+                "runner_id": runner.id,
+                "name": f"{runner.first_name} {runner.last_name}",
+                "lat": last.location.y,
+                "lon": last.location.x,
+                "timestamp": last.timestamp.strftime("%H:%M:%S"),
+            })
+    return JsonResponse({"runners": data})
