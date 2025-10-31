@@ -1,10 +1,8 @@
 from django.contrib.gis.geos import Point
-from django.contrib.gis.db.models.functions import Distance
-from django.contrib.gis.measure import D
 from django.utils import timezone
-from django.db.models import Sum
 from django.shortcuts import render, get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
 from django.http import JsonResponse
 from core.models import Race
 from registration.models import Runner
@@ -13,145 +11,141 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from geopy.distance import geodesic
 import json
-import math
 
 def dashboard(request, race_id):
-    """
-    Display live dashboard showing each runner’s last known position for a race.
-    Works even if Runner has no direct race FK.
-    """
     race = get_object_or_404(Race, id=race_id)
+    return render(request, "tracking/dashboard.html", {"race": race})
 
-    # Get all runners who have any TrackingPoint in this race
+@require_GET
+def get_latest_locations(request, race_id):
+    race = get_object_or_404(Race, id=race_id)
     runner_ids = (
         TrackingPoint.objects.filter(race=race)
         .values_list("runner_id", flat=True)
         .distinct()
     )
     runners = Runner.objects.filter(id__in=runner_ids)
-
-    runner_data = []
+    data = []
     for runner in runners:
-        # Get the most recent tracking point for each runner
-        last_point = (
+        last = (
             TrackingPoint.objects.filter(runner=runner, race=race)
             .order_by("-timestamp")
             .first()
         )
-        if last_point:
-            runner_data.append({
+        if last:
+            points = (
+                TrackingPoint.objects.filter(runner=runner, race=race)
+                .order_by("timestamp")
+                .values_list("location", "timestamp")
+            )
+            total_distance = 0.0
+            total_time = 0.0
+            prev_point, prev_time = None, None
+            for loc, time in points:
+                if prev_point:
+                    seg = geodesic((prev_point.y, prev_point.x), (loc.y, loc.x)).meters
+                    if seg >= 3:
+                        total_distance += seg
+                        total_time += (time - prev_time).total_seconds()
+                prev_point, prev_time = loc, time
+
+            pace_min_km = (total_time / 60) / (total_distance / 1000) if total_distance > 0 else None
+            speed_kmh = (total_distance / total_time) * 3.6 if total_time > 0 else None
+
+            data.append({
+                "runner_id": runner.id,
                 "name": f"{runner.first_name} {runner.last_name}",
-                "lat": last_point.location.y,
-                "lng": last_point.location.x,
-                "time": last_point.timestamp.strftime("%H:%M:%S"),
+                "lat": last.location.y,
+                "lon": last.location.x,
+                "timestamp": last.timestamp.strftime("%H:%M:%S"),
+                "distance_m": round(total_distance, 1),
+                "pace_min_km": round(pace_min_km, 2) if pace_min_km else None,
+                "speed_kmh": round(speed_kmh, 2) if speed_kmh else None,
             })
-
-    context = {
-        "race": race,
-        "runners": runner_data,
-    }
-    return render(request, "tracking/dashboard.html", context)
-
+    return JsonResponse({"runners": data})
 
 @csrf_exempt
 def post_location(request, race_id):
-    """
-    Receives live GPS data and updates the live race:
-    {
-        "runner_id": 1,
-        "latitude": 33.6844,
-        "longitude": 73.0479
-    }
-    """
-
     if request.method != "POST":
         return JsonResponse({"error": "POST only"}, status=405)
-
     try:
-        data = json.loads(request.body)
+        body = request.body.decode("utf-8") if isinstance(request.body, (bytes, bytearray)) else request.body
+        data = json.loads(body or "{}")
         runner_id = data.get("runner_id")
         lat = data.get("latitude") or data.get("lat")
         lon = data.get("longitude") or data.get("lng")
-
-        if not (runner_id and lat and lon):
+        if not (runner_id and lat is not None and lon is not None):
             return JsonResponse({"error": "Missing required fields"}, status=400)
-
         race = get_object_or_404(Race, id=race_id)
         runner = get_object_or_404(Runner, id=runner_id)
-
-        # Convert to Point (for GIS storage)
         location = Point(float(lon), float(lat))
         timestamp = timezone.now()
-
-        # Get last tracking point for this runner/race
         prev = (
             TrackingPoint.objects.filter(runner=runner, race=race)
             .order_by("-timestamp")
             .first()
         )
-
-        # --- Compute incremental distance ---
         incremental_distance = 0.0
         if prev:
             prev_coords = (prev.location.y, prev.location.x)
             curr_coords = (float(lat), float(lon))
-            incremental_distance = geodesic(prev_coords, curr_coords).meters
-
-            # ignore GPS jitter (tiny random shifts)
-            if incremental_distance < 3:
-                incremental_distance = 0.0
-
-        # Save the new tracking point
-        tp = TrackingPoint.objects.create(
-            runner=runner, race=race, location=location, timestamp=timestamp
-        )
-
-        # --- Compute total distance and pace ---
+            d = geodesic(prev_coords, curr_coords).meters
+            if d >= 3:
+                incremental_distance = d
+        tp = TrackingPoint.objects.create(runner=runner, race=race, location=location, timestamp=timestamp)
         points = (
             TrackingPoint.objects.filter(runner=runner, race=race)
             .order_by("timestamp")
             .values_list("location", "timestamp")
         )
-
-        total_distance = 0.0  # in meters
-        total_time = 0.0      # in seconds
+        total_distance, total_time = 0.0, 0.0
         prev_point, prev_time = None, None
-
         for loc, time in points:
             if prev_point:
-                prev_coords = (prev_point.y, prev_point.x)
-                curr_coords = (loc.y, loc.x)
-                segment_dist = geodesic(prev_coords, curr_coords).meters
-                # again, ignore GPS noise below 3m
-                if segment_dist > 3:
-                    total_distance += segment_dist
+                seg = geodesic((prev_point.y, prev_point.x), (loc.y, loc.x)).meters
+                if seg >= 3:
+                    total_distance += seg
                     total_time += (time - prev_time).total_seconds()
             prev_point, prev_time = loc, time
-
-        # --- Compute pace (seconds per km) ---
-        pace_spm = (total_time / (total_distance / 1000)) if total_distance > 0 else 0
-
-        # --- Prepare broadcast payload ---
-        message = {
+        pace_min_km = (total_time / 60) / (total_distance / 1000) if total_distance > 0 else None
+        speed_kmh = (total_distance / total_time) * 3.6 if total_time > 0 else None
+        runner_message = {
             "runner_id": runner.id,
             "name": f"{runner.first_name} {runner.last_name}",
             "lat": float(lat),
             "lon": float(lon),
-            "distance_m": round(total_distance, 2),
-            "pace_spm": round(pace_spm, 1) if pace_spm else None,
+            "distance_m": round(total_distance, 1),
+            "incremental_m": round(incremental_distance, 2),
+            "pace_min_km": round(pace_min_km, 2) if pace_min_km else None,
+            "speed_kmh": round(speed_kmh, 2) if speed_kmh else None,
             "timestamp": tp.timestamp.strftime("%H:%M:%S"),
         }
-
-        print("📡 Broadcasting message:", message)
-
-        # --- Send via WebSocket to dashboard ---
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"race_{race_id}",
-            {"type": "race_update", "message": message},
+            {"type": "race_update", "message": runner_message},
         )
-
-        return JsonResponse({"status": "ok", "data": message})
-
+        # build leaderboard
+        leaderboard = []
+        runner_ids = TrackingPoint.objects.filter(race=race).values_list("runner_id", flat=True).distinct()
+        runners = Runner.objects.filter(id__in=runner_ids)
+        for r in runners:
+            pts = TrackingPoint.objects.filter(runner=r, race=race).order_by("timestamp").values_list("location", "timestamp")
+            td = 0.0
+            prev_p, prev_t = None, None
+            for loc, t in pts:
+                if prev_p:
+                    seg = geodesic((prev_p.y, prev_p.x), (loc.y, loc.x)).meters
+                    if seg >= 3:
+                        td += seg
+                prev_p, prev_t = loc, t
+            leaderboard.append({"runner_id": r.id, "name": f"{r.first_name} {r.last_name}", "distance_m": round(td, 1)})
+        leaderboard.sort(key=lambda x: x["distance_m"], reverse=True)
+        async_to_sync(channel_layer.group_send)(
+            f"race_{race_id}",
+            {"type": "leaderboard_update", "leaderboard": leaderboard},
+        )
+        return JsonResponse({"status": "ok", "data": runner_message})
     except Exception as e:
+        print("❌ post_location error:", str(e))
         return JsonResponse({"error": str(e)}, status=500)
