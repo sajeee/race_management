@@ -102,57 +102,67 @@ window.socket.onopen = () => console.log("✅ WS connected");
 window.socket.onerror = (e) => console.error("❌ WS error", e);
 window.socket.onclose = () => console.warn("⚠️ WS closed");
 
-window.socket.onmessage = (e) => {
+window.socket.onmessage = function (event) {
   try {
-    const msg = JSON.parse(e.data);
+    const msg = JSON.parse(event.data);
     console.log("📡 Raw WS message:", msg);
 
-    if (msg.type === "info" || msg.type === "ping") return;
-
-    // ✅ Handle leaderboard snapshot/update separately (no lat/lon)
-    if (msg.type === "leaderboard_snapshot" || msg.type === "leaderboard_update") {
-      (msg.data || []).forEach((r) => {
-        window.runnerData[r.runner_id] = {
-          ...(window.runnerData[r.runner_id] || {}),
-          ...r,
-        };
-      });
-      updateLeaderboard();
+    if (msg.type === "info") {
+      console.log("ℹ️", msg.message);
       return;
     }
 
-    // ✅ Handle location updates (race_update)
-    const data = msg.message || msg;
-    const lat = parseFloat(data.lat ?? data.latitude);
-    const lon = parseFloat(data.lon ?? data.lng ?? data.longitude);
-    if (isNaN(lat) || isNaN(lon)) return; // skip invalid coords
-
-    const id = data.runner_id || "unknown";
-    const name = data.name || `Runner ${id}`;
-    const pos = [lat, lon];
-
-    // Create or move marker
-    if (!window.markers[id]) {
-      window.markers[id] = L.marker(pos).addTo(window.map).bindPopup(name);
-      console.log(`📍 Created marker for ${name}`);
-    } else {
-      const cur = window.markers[id].getLatLng();
-      moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], pos);
+    // 🏁 Leaderboard snapshot
+    if (msg.type === "leaderboard_snapshot" || msg.type === "leaderboard_update") {
+      updateLeaderboard(msg.data);
+      return;
     }
 
-    // Update runner data
-    window.runnerData[id] = {
-      ...window.runnerData[id],
-      ...data,
-      name,
-      last_update: Date.now(),
-    };
+    // 📍 Race update (runner position)
+    if (msg.type === "race_update") {
+      const data = msg.message;
+      if (!data.lat || !data.lon) {
+        console.warn("⚠️ Missing coordinates in race_update:", data);
+        return;
+      }
 
-    updateLeaderboard();
+      if (!runners[data.runner_id]) {
+        // 🆕 Create marker for this runner if not exists
+        const color = getRandomColor();
+        const marker = L.marker([data.lat, data.lon], {
+          title: data.name,
+          icon: L.divIcon({
+            className: "runner-marker",
+            html: `<div style="background:${color};width:12px;height:12px;border-radius:50%;"></div>`,
+          }),
+        }).addTo(map);
+
+        runners[data.runner_id] = {
+          name: data.name,
+          marker: marker,
+          color: color,
+        };
+      } else {
+        // 🏃 Move existing marker
+        runners[data.runner_id].marker.setLatLng([data.lat, data.lon]);
+      }
+
+      // Center map smoothly on runner if it's the first one
+      if (Object.keys(runners).length === 1) {
+        map.setView([data.lat, data.lon], 16);
+      }
+
+      updateLeaderboardRow(data);
+      return;
+    }
+
+    if (msg.type === "ping") return; // Ignore pings
+
   } catch (err) {
     console.error("❌ WS parse error:", err);
   }
 };
+
 
 // ------------------------------------------------------------
 // SIMULATE RUNNER (for debugging)
