@@ -4,31 +4,88 @@
 <head>
   <meta charset="utf-8">
   <title>{{ race.name }} — Live Race Dashboard</title>
+
+  <!-- Base Styles -->
   <link rel="stylesheet" href="{% static 'tracking/css/styles.css' %}">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+
   <style>
-    body { font-family: "Segoe UI", Arial, sans-serif; margin:0; background:#f7f7f9; }
-    header { background:#1a73e8; color:white; padding:12px 20px; }
-    header h1 { margin:0; font-size:1.3rem; }
-    main { display:flex; gap:16px; padding:16px; }
-    #map { flex:1; height:80vh; border-radius:10px; }
-    #sidebar { width:380px; background:white; padding:12px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); }
-    table { width:100%; border-collapse:collapse; font-size:14px; }
-    th, td { text-align:center; padding:6px; border-bottom:1px solid #eee; }
-    thead { background:#fafafa; }
-    @media (max-width:900px) { main { flex-direction:column; } #sidebar { width:100%; } }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #fafafa;
+      margin: 0;
+      padding: 16px;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .dashboard-container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    #map {
+      flex: 1;
+      min-width: 600px;
+      height: 80vh;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .leaderboard-container {
+      width: 380px;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .leaderboard-container h3 {
+      text-align: center;
+      margin: 10px 0;
+      color: #222;
+    }
+    #leaderboard {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: center;
+      font-size: 14px;
+    }
+    #leaderboard th, #leaderboard td {
+      border: 1px solid #ccc;
+      padding: 6px;
+    }
+    #leaderboard th {
+      background: #f5f5f5;
+      font-weight: bold;
+    }
+    #leaderboard tbody tr {
+      transition: background 0.3s;
+    }
+    #leaderboard tbody tr:hover {
+      background: #fffae6;
+    }
+    footer {
+      margin-top: 16px;
+      text-align: center;
+      color: #777;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>{{ race.name }} — Live Dashboard</h1>
-  </header>
+  <h1>🏁 {{ race.name }} — Live Dashboard</h1>
 
-  <main>
+  <div class="dashboard-container">
+    <!-- 🗺️ Map Section -->
     <div id="map"></div>
 
-    <aside id="sidebar">
-      <h3 style="text-align:center;">🏁 Leaderboard</h3>
+    <!-- 🏆 Leaderboard Section -->
+    <div class="leaderboard-container">
+      <h3>🏆 Live Leaderboard</h3>
       <table id="leaderboard">
         <thead>
           <tr>
@@ -42,14 +99,24 @@
           </tr>
         </thead>
         <tbody>
-          <tr><td colspan="7" style="text-align:center;">Loading...</td></tr>
+          <tr><td colspan="7">Loading...</td></tr>
         </tbody>
       </table>
-    </aside>
-  </main>
+    </div>
+  </div>
 
-  <script>window.RACE_ID = {{ race.id }};</script>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <footer>📡 Connected runners update automatically in real-time.</footer>
+
+  <!-- Expose Race ID -->
+  <script>
+    window.RACE_ID = {{ race.id }};
+  </script>
+
+  <!-- Libraries -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Custom Dashboard Logic -->
   <script src="{% static 'tracking/js/dashboard.js' %}"></script>
 </body>
 </html>
+
