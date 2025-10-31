@@ -1,66 +1,55 @@
 {% load static %}
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Race Dashboard — {{ race.name }}</title>
+  <title>{{ race.name }} — Live Race Dashboard</title>
   <link rel="stylesheet" href="{% static 'tracking/css/styles.css' %}">
-
-
-  <!-- pin Leaflet version to avoid surprise breakage -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="" crossorigin=""/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-  body { font-family: Arial, sans-serif; }
-  #map { height: 80vh; }
-  #leaderboard tbody tr[data-bib] {
-    transition: background-color 0.4s;
-  }
-</style>
+    body { font-family: "Segoe UI", Arial, sans-serif; margin:0; background:#f7f7f9; }
+    header { background:#1a73e8; color:white; padding:12px 20px; }
+    header h1 { margin:0; font-size:1.3rem; }
+    main { display:flex; gap:16px; padding:16px; }
+    #map { flex:1; height:80vh; border-radius:10px; }
+    #sidebar { width:380px; background:white; padding:12px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { text-align:center; padding:6px; border-bottom:1px solid #eee; }
+    thead { background:#fafafa; }
+    @media (max-width:900px) { main { flex-direction:column; } #sidebar { width:100%; } }
+  </style>
 </head>
 <body>
-  <h1>{{ race.name }} — Live Dashboard</h1>
-  <div style="display:flex; gap:16px;">
-    <div id="map" style="flex:1"></div>
-    <div style="width:360px">
-      <h3>Leaderboard</h3>
-<table id="leaderboard" style="width:100%;border-collapse:collapse">
-  <thead>
-  <tr>
-    <th>#</th>
-    <th>Bib</th>
-    <th>Name</th>
-    <th>Dist (m)</th>
-    <th>Pace s/km</th>
-    <th>Speed (km/h)</th>
-    <th>Last Update</th>
-  </tr>
-</thead>
+  <header>
+    <h1>{{ race.name }} — Live Dashboard</h1>
+  </header>
 
-  <tbody id="leaderboard-body">
-       <tr><td colspan="5">No runners yet</td></tr>
-  </tbody>
-</table>
-    </div>
-  </div>
+  <main>
+    <div id="map"></div>
 
-  <!-- expose the race id (inline script). This must be BEFORE dashboard.js -->
-  <script>
-    // safe: only declare once, and use `window.RACE_ID` to avoid const redeclare errors
-    window.RACE_ID = {{ race.id }};
-   // const WS_PROTO = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  //  const WS_URL = `${WS_PROTO}://${window.location.host}/ws/race/${window.RACE_ID}/`;
-  //  console.log('WS URL:', WS_URL);
-  </script>
+    <aside id="sidebar">
+      <h3 style="text-align:center;">🏁 Leaderboard</h3>
+      <table id="leaderboard">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Bib</th>
+            <th>Name</th>
+            <th>Dist (m)</th>
+            <th>Pace (min/km)</th>
+            <th>Speed (km/h)</th>
+            <th>Last</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="7" style="text-align:center;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </aside>
+  </main>
 
-  <!-- Leaflet JS (ensure this loads before our dashboard.js) -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="" crossorigin=""></script>
-
-  <!-- our dashboard behavior -->
-
+  <script>window.RACE_ID = {{ race.id }};</script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="{% static 'tracking/js/dashboard.js' %}"></script>
-
-
-
 </body>
 </html>
-
