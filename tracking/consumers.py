@@ -1,74 +1,65 @@
 # tracking/consumers.py
 import json
-from channels.generic.websocket import AsyncWebsocketConsumer
+import asyncio
 from datetime import datetime
-
+from channels.generic.websocket import AsyncWebsocketConsumer
 
 class RaceTrackerConsumer(AsyncWebsocketConsumer):
-    """
-    Handles WebSocket connections for live race tracking.
-    - Each race has its own group (e.g. 'race_1')
-    - Receives messages from the Django backend via group_send
-    - Broadcasts live runner data to all connected dashboard clients
-    """
-
     async def connect(self):
-        self.race_id = self.scope["url_route"]["kwargs"]["race_id"]
+        self.race_id = self.scope['url_route']['kwargs']['race_id']
         self.group_name = f"race_{self.race_id}"
 
-        # Join race group
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
-        # Send confirmation message
+        # send connection confirmation
         await self.send_json({
             "type": "info",
             "message": f"✅ Connected to race {self.race_id}",
             "timestamp": datetime.utcnow().isoformat()
         })
-        print(f"📡 WebSocket connected to {self.group_name}")
+        print(f"📡 WebSocket connected: {self.group_name}")
+
+        # Start keep-alive ping loop
+        self.keepalive_task = asyncio.create_task(self.keep_alive())
 
     async def disconnect(self, close_code):
-        # Leave race group
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
-        print(f"⚠️ WebSocket disconnected from {self.group_name}")
+        if hasattr(self, "keepalive_task"):
+            self.keepalive_task.cancel()
+        print(f"⚠️ WebSocket disconnected: {self.group_name}")
+
+    async def keep_alive(self):
+        """Send periodic ping messages to prevent Railway/Heroku timeout."""
+        try:
+            while True:
+                await asyncio.sleep(25)  # every 25 seconds
+                await self.send_json({"type": "ping", "timestamp": datetime.utcnow().isoformat()})
+        except asyncio.CancelledError:
+            pass
 
     async def receive(self, text_data):
-        """
-        Handle any message coming *from* the browser (dashboard or testing client).
-        Normally dashboards only receive, but we allow simulateRunner() to push test updates.
-        """
+        """Handle messages from the dashboard (for simulation/testing)."""
         try:
             data = json.loads(text_data)
             if data.get("type") == "simulate":
-                # Broadcast simulated location updates for testing
                 await self.channel_layer.group_send(
                     self.group_name,
                     {"type": "race_update", "message": data["message"]}
                 )
-                print("🧪 Simulated broadcast:", data["message"])
-            else:
-                print("📩 Received client message:", data)
+                print("🧪 Simulated update:", data["message"])
         except Exception as e:
-            print("❌ Error handling client message:", str(e))
+            print("❌ receive() error:", e)
 
     async def race_update(self, event):
-        """
-        Called by backend (views.post_location) whenever a new runner location is posted.
-        """
-        message = event.get("message", {})
-        try:
-            # Ensure timestamp is formatted properly
-            if "timestamp" not in message:
-                message["timestamp"] = datetime.utcnow().strftime("%H:%M:%S")
+        """Send live updates from backend to dashboard."""
+        msg = event.get("message", {})
+        if "timestamp" not in msg:
+            msg["timestamp"] = datetime.utcnow().strftime("%H:%M:%S")
+        await self.send_json(msg)
 
-            # Send to all connected dashboard clients
-            await self.send_json(message)
-        except Exception as e:
-            print("❌ Error sending race_update:", str(e))
-
-    # Helper: safe JSON sending
     async def send_json(self, data):
+        """Helper for safe JSON transmission."""
         try:
             await self.send(text_data=json.dumps(data))
         except Exception as e:
