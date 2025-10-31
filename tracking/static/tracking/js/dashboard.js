@@ -1,6 +1,6 @@
 /* ============================================================
-   Live Race Dashboard JS (v4 - Final Stable)
-   Handles live runner updates safely (no null lat/lon errors)
+   Live Race Dashboard JS (v5 - Stable & Safe)
+   Fixes: ignores non-location WS messages gracefully
    ============================================================ */
 
 console.log("🚀 dashboard.js LOADED from:", window.location.origin + "/static/tracking/js/dashboard.js");
@@ -33,19 +33,20 @@ function getRandomColor() {
 // 🏁 Update leaderboard
 function updateLeaderboard(data) {
   const tbody = document.getElementById("leaderboard-body");
-  if (!tbody) return;
-  tbody.innerHTML = "";
+  if (!tbody || !Array.isArray(data)) return;
 
-  data.sort((a, b) => b.distance_m - a.distance_m);
+  tbody.innerHTML = "";
+  data.sort((a, b) => (b.distance_m || 0) - (a.distance_m || 0));
+
   data.forEach((runner, index) => {
     const pace = (runner.pace_min_km || 0).toFixed(2);
     const speed = (runner.speed_kmh || 0).toFixed(2);
     const row = `
       <tr>
         <td>${index + 1}</td>
-        <td>${runner.runner_id}</td>
-        <td>${runner.name}</td>
-        <td>${runner.distance_m.toFixed(1)}</td>
+        <td>${runner.runner_id || "-"}</td>
+        <td>${runner.name || "-"}</td>
+        <td>${(runner.distance_m || 0).toFixed(1)}</td>
         <td>${pace}</td>
         <td>${speed}</td>
         <td>${runner.timestamp || "-"}</td>
@@ -54,7 +55,7 @@ function updateLeaderboard(data) {
   });
 }
 
-// 🧠 Safe coordinate validator
+// 🧠 Coordinate validator
 function validCoords(lat, lon) {
   return (
     typeof lat === "number" &&
@@ -68,62 +69,69 @@ function validCoords(lat, lon) {
   );
 }
 
-// 📡 Handle WebSocket messages
+// 📡 WebSocket message handler
 window.socket.onmessage = function (event) {
   try {
     const msg = JSON.parse(event.data);
-    console.log("📡 Incoming WS:", msg);
+    console.log("📡 Raw WS message:", msg);
 
-    if (msg.type === "info") {
-      console.log("ℹ️", msg.message);
-      return;
-    }
+    switch (msg.type) {
+      case "info":
+        console.log("ℹ️", msg.message);
+        break;
 
-    if (msg.type === "leaderboard_snapshot" || msg.type === "leaderboard_update") {
-      updateLeaderboard(msg.data);
-      return;
-    }
+      case "leaderboard_snapshot":
+      case "leaderboard_update":
+        updateLeaderboard(msg.data);
+        break;
 
-    if (msg.type === "race_update") {
-      const data = msg.message || {};
-      const lat = parseFloat(data.lat);
-      const lon = parseFloat(data.lon);
+      case "race_update": {
+        const data = msg.message || {};
+        const lat = parseFloat(data.lat);
+        const lon = parseFloat(data.lon);
+        if (!validCoords(lat, lon)) {
+          console.warn("⚠️ Ignoring invalid coordinates:", data);
+          break;
+        }
 
-      if (!validCoords(lat, lon)) {
-        console.warn("⚠️ Ignoring invalid coordinates:", lat, lon);
-        return;
+        // 🏃‍♂️ Create or update runner marker
+        if (!runners[data.runner_id]) {
+          const color = getRandomColor();
+          const marker = L.marker([lat, lon], {
+            title: data.name,
+            icon: L.divIcon({
+              className: "runner-marker",
+              html: `<div style="background:${color};width:12px;height:12px;border-radius:50%;border:2px solid white"></div>`,
+            }),
+          }).addTo(map);
+
+          runners[data.runner_id] = { name: data.name, marker, color };
+          if (Object.keys(runners).length === 1) map.setView([lat, lon], 16);
+          console.log(`📍 Created marker for ${data.name}`);
+        } else {
+          runners[data.runner_id].marker.setLatLng([lat, lon]);
+        }
+
+        // Update leaderboard with this runner’s info
+        updateLeaderboard([data]);
+        break;
       }
 
-      // Create marker if missing
-      if (!runners[data.runner_id]) {
-        const color = getRandomColor();
-        const marker = L.marker([lat, lon], {
-          title: data.name,
-          icon: L.divIcon({
-            className: "runner-marker",
-            html: `<div style="background:${color};width:12px;height:12px;border-radius:50%;border:2px solid white"></div>`,
-          }),
-        }).addTo(map);
+      case "ping":
+        console.log("💓 Ping received");
+        break;
 
-        runners[data.runner_id] = { name: data.name, marker, color };
-        if (Object.keys(runners).length === 1) map.setView([lat, lon], 16);
-        console.log(`📍 Created marker for ${data.name}`);
-      } else {
-        runners[data.runner_id].marker.setLatLng([lat, lon]);
-      }
-
-      updateLeaderboard([data]);
-      return;
+      default:
+        console.log("⚠️ Ignored unknown message type:", msg.type);
+        break;
     }
-
-    if (msg.type === "ping") return;
-
   } catch (err) {
     console.error("❌ WS parse error:", err);
   }
 };
 
-// ⚡ Socket lifecycle
+// ⚡ Socket lifecycle logs
 window.socket.onopen = () => console.log("✅ WS connected");
 window.socket.onclose = () => console.warn("⚠️ WS closed");
 window.socket.onerror = (e) => console.error("❌ WS error:", e);
+
