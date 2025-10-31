@@ -4,125 +4,86 @@
 <head>
   <meta charset="utf-8">
   <title>{{ race.name }} — Live Race Dashboard</title>
-
-  <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin=""
-  />
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    crossorigin=""
-  ></script>
-
-  <!-- Custom CSS -->
   <link rel="stylesheet" href="{% static 'tracking/css/styles.css' %}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
     body {
-      font-family: "Segoe UI", Arial, sans-serif;
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
       margin: 0;
       padding: 0;
-      background: #fafafa;
+      background: #f7f7f9;
     }
 
-    header {
-      background: #1a73e8;
-      color: white;
-      padding: 12px 20px;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    h1 {
+      text-align: center;
+      margin: 20px 0;
+      color: #333;
     }
 
-    header h1 {
-      margin: 0;
-      font-size: 1.4rem;
-    }
-
-    #last-update {
-      font-size: 0.9rem;
-      opacity: 0.8;
-      margin-top: 4px;
-    }
-
-    main {
+    #container {
       display: flex;
       gap: 16px;
-      padding: 16px;
+      padding: 0 20px 20px 20px;
     }
 
     #map {
       flex: 1;
       height: 80vh;
-      border: 2px solid #ccc;
       border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
     }
 
     #sidebar {
       width: 380px;
-      background: white;
+      background: #fff;
+      padding: 12px;
       border-radius: 10px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-      overflow: hidden;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
     }
 
-    #sidebar h3 {
-      background: #f1f1f1;
-      margin: 0;
-      padding: 10px;
-      border-bottom: 1px solid #ddd;
-    }
-
-    table {
+    #leaderboard {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.9rem;
+      font-size: 14px;
     }
 
-    th, td {
-      padding: 8px;
-      border-bottom: 1px solid #eee;
+    #leaderboard th, #leaderboard td {
+      border-bottom: 1px solid #ddd;
+      padding: 6px 8px;
       text-align: center;
     }
 
-    thead {
-      background: #f8f9fa;
-    }
-
-    tr.highlight {
-      background-color: #fff7c2 !important;
-      transition: background-color 0.6s;
-    }
-
-    tr:nth-child(even) {
-      background: #fdfdfd;
-    }
-
-    tr:first-child td {
+    #leaderboard th {
+      background: #f2f2f2;
       font-weight: bold;
+      color: #333;
     }
 
-    @media (max-width: 900px) {
-      main {
-        flex-direction: column;
-      }
-      #sidebar {
-        width: 100%;
-      }
+    #leaderboard tbody tr[data-id] {
+      transition: background-color 0.4s;
+    }
+
+    #leaderboard tbody tr:hover {
+      background: #e9f5ff;
+    }
+
+    #footer {
+      text-align: center;
+      font-size: 12px;
+      color: #888;
+      padding: 6px;
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>{{ race.name }} — Live Dashboard</h1>
-    <div id="last-update">Waiting for updates...</div>
-  </header>
+  <h1>{{ race.name }} — Live Race Dashboard 🏁</h1>
 
-  <main>
+  <div id="container">
     <div id="map"></div>
 
-    <aside id="sidebar">
-      <h3>🏁 Leaderboard</h3>
+    <div id="sidebar">
+      <h3 style="text-align:center;">🏃 Live Leaderboard</h3>
       <table id="leaderboard">
         <thead>
           <tr>
@@ -132,41 +93,57 @@
             <th>Dist (m)</th>
             <th>Pace (min/km)</th>
             <th>Speed (km/h)</th>
-            <th>Last Update</th>
+            <th>Last</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td colspan="7">Waiting for runners...</td></tr>
+          <tr><td colspan="7" style="text-align:center;">Loading...</td></tr>
         </tbody>
       </table>
-    </aside>
-  </main>
+    </div>
+  </div>
 
-  <!-- Expose Race ID for dashboard.js -->
+  <div id="footer">
+    Real-time race tracking powered by Django Channels + Leaflet 🌍
+  </div>
+
+  <!-- expose the race id BEFORE dashboard.js -->
   <script>
     window.RACE_ID = {{ race.id }};
   </script>
 
-  <!-- Load dashboard.js -->
+  <!-- Dependencies -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Our main logic -->
   <script src="{% static 'tracking/js/dashboard.js' %}"></script>
 
+  <!-- Restore local runners immediately -->
   <script>
-    // Update header timestamp every 5s
-    setInterval(() => {
-      const latest = Object.values(window.runnerData || {})
-        .map(r => r.last_update)
-        .filter(Boolean)
-        .sort((a, b) => b - a)[0];
-
-      const el = document.getElementById("last-update");
-      if (el) {
-        if (latest)
-          el.textContent = "Last update: " + new Date(latest).toLocaleTimeString();
-        else
-          el.textContent = "Waiting for updates...";
+    document.addEventListener("DOMContentLoaded", () => {
+      const saved = JSON.parse(localStorage.getItem("runnerData") || "{}");
+      const keys = Object.keys(saved);
+      if (keys.length > 0) {
+        console.log("🔄 Restoring runnerData from localStorage:", saved);
+        window.runnerData = saved;
+        // Add markers for each saved runner
+        for (const id of keys) {
+          const r = saved[id];
+          if (r.lat && r.lon) {
+            const pos = [parseFloat(r.lat), parseFloat(r.lon)];
+            window.markers = window.markers || {};
+            if (!window.markers[id]) {
+              window.markers[id] = L.marker(pos)
+                .addTo(window.map)
+                .bindPopup(`${r.name || 'Runner'}<br>Restored position`);
+            }
+          }
+        }
+        if (window.updateLeaderboard) updateLeaderboard();
       }
-    }, 5000);
+    });
   </script>
 </body>
 </html>
+
 
