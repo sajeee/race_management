@@ -22,19 +22,34 @@ function geodesicDistance([lat1, lon1], [lat2, lon2]){
 }
 
 function updateLeaderboard(){
-    const tbody=document.querySelector("#leaderboard tbody");
+    const tbody = document.getElementById("leaderboard-body");
     if(!tbody) return;
-    const runners=Object.values(window.runnerData).sort((a,b)=>(b.distance_m||0)-(a.distance_m||0));
-    tbody.innerHTML="";
+
+    const runners = Object.values(window.runnerData).sort((a,b)=>(b.distance_m||0)-(a.distance_m||0));
+    tbody.innerHTML = "";
+
     runners.forEach((r,i)=>{
-        const speed=(r.pace_m_per_km? (60/r.pace_m_per_km).toFixed(1):"-");
-        const tr=document.createElement("tr");
-        tr.dataset.id=r.runner_id;
-        let medal=""; if(i===0) medal="🥇"; else if(i===1) medal="🥈"; else if(i===2) medal="🥉";
-        tr.innerHTML=`<td>${i+1}</td><td>${r.runner_id}</td><td>${medal} ${r.name}</td><td>${r.distance_m?.toFixed(1)||0}</td><td>${r.pace_m_per_km?.toFixed(1)||"-"}</td><td>${speed}</td><td>${r.timestamp||"-"}</td>`;
+        const speed = r.pace_m_per_km ? (60/r.pace_m_per_km).toFixed(1) : "-";
+        const tr = document.createElement("tr");
+        tr.dataset.id = r.runner_id;
+        let medal="";
+        if(i===0) medal="🥇";
+        else if(i===1) medal="🥈";
+        else if(i===2) medal="🥉";
+
+        tr.innerHTML = `
+            <td>${i+1}</td>
+            <td>${r.runner_id}</td>
+            <td>${medal} ${r.name}</td>
+            <td>${r.distance_m?.toFixed(1) || 0}</td>
+            <td>${r.pace_m_per_km?.toFixed(1) || "-"}</td>
+            <td>${speed}</td>
+            <td>${r.timestamp || "-"}</td>
+        `;
         tbody.appendChild(tr);
     });
 }
+
 
 function connectWS(){
     const proto = location.protocol==="https:"?"wss":"ws";
