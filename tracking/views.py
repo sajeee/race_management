@@ -40,99 +40,49 @@ def dashboard(request, race_id):
                 "timestamp": last_point.timestamp.strftime("%H:%M:%S"),
             })
     return render(request, "tracking/dashboard.html", {"race": race, "runners": runner_data})
-
-@csrf_exempt
-async def post_location(request, race_id):
-    """
-    Async POST endpoint:
-    JSON: { "runner_id": 1, "lat": 33.6, "lon": 73.0, "timestamp": "ISO8601" }
-    Header: Authorization: Token <TRACKING_API_TOKEN>   (optional)
-    """
+    @csrf_exempt
+def post_location(request, race_id):
     if request.method != "POST":
-        return JsonResponse({"error": "POST only"}, status=405)
-
-    # token guard (if set)
-    if TRACKING_API_TOKEN:
-        header = request.headers.get("Authorization", "") or request.META.get("HTTP_AUTHORIZATION", "")
-        if not header or not header.startswith("Token ") or header.split(" ", 1)[1] != TRACKING_API_TOKEN:
-            return JsonResponse({"error": "Forbidden"}, status=403)
+        return JsonResponse({"error": "POST required"}, status=405)
 
     try:
-        body = await request.body
-        data = json.loads(body.decode())
-    except Exception:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        data = json.loads(request.body.decode())
+        runner_id = data.get("runner_id")
+        lat = data.get("latitude")
+        lon = data.get("longitude")
 
-    runner_id = data.get("runner_id") or data.get("id") or data.get("bib")
-    lat = data.get("lat") or data.get("latitude")
-    lon = data.get("lon") or data.get("longitude")
-    ts = data.get("timestamp")
+        if not all([runner_id, lat, lon]):
+            return JsonResponse({"error": "Missing data"}, status=400)
 
-    if not (runner_id and lat is not None and lon is not None):
-        return JsonResponse({"error": "Missing fields"}, status=400)
+        runner = get_object_or_404(Runner, id=runner_id)
+        race = get_object_or_404(Race, id=race_id)
 
-    race = await sync_to_async(get_object_or_404)(Race, id=race_id)
-    runner = await sync_to_async(get_object_or_404)(Runner, id=runner_id)
+        # Save tracking point
+        TrackingPoint.objects.create(
+            runner=runner,
+            race=race,
+            location=f"POINT({lon} {lat})",
+            timestamp=timezone.now()
+        )
 
-    # create location point
-    location = Point(float(lon), float(lat))
-    timestamp = timezone.now()
+        # Broadcast to WebSocket
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"race_{race_id}",
+            {
+                "type": "race_update",
+                "message": {
+                    "runner_id": runner.id,
+                    "name": str(runner),
+                    "lat": lat,
+                    "lon": lon,
+                    "timestamp": timezone.now().strftime("%H:%M:%S"),
+                },
+            },
+        )
 
-    # fetch last point (sync->async wrapper)
-    prev = await sync_to_async(
-        lambda: TrackingPoint.objects.filter(runner_id=runner_id, race_id=race_id).order_by("-timestamp").first()
-    )()
+        return JsonResponse({"status": "ok"})
 
-    incremental = 0.0
-    if prev:
-        try:
-            incremental = geodesic((prev.location.y, prev.location.x), (float(lat), float(lon))).meters
-            if incremental < 3:  # jitter threshold
-                incremental = 0.0
-        except Exception:
-            incremental = 0.0
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 
-    # persist new point
-    tp = await sync_to_async(TrackingPoint.objects.create)(
-        runner=runner, race=race, location=location, timestamp=timestamp
-    )
-
-    # compute total distance by scanning points for this runner: small races fine; optimize later
-    points = await sync_to_async(list)(
-        TrackingPoint.objects.filter(runner_id=runner_id, race_id=race_id).order_by("timestamp").values_list("location", "timestamp")
-    )
-    total_distance = 0.0
-    total_time = 0.0
-    prev_point, prev_time = None, None
-    for loc, t in points:
-        if prev_point:
-            try:
-                d = geodesic((prev_point.y, prev_point.x), (loc.y, loc.x)).meters
-                if d > 3:
-                    total_distance += d
-                    total_time += (t - prev_time).total_seconds()
-            except Exception:
-                pass
-        prev_point, prev_time = loc, t
-
-    pace_spm = (total_time / (total_distance / 1000.0)) if total_distance > 0 else None
-
-    # prepare payload
-    payload = {
-        "runner_id": runner.id,
-        "name": f"{getattr(runner, 'first_name','')} {getattr(runner,'last_name','')}".strip(),
-        "lat": float(lat),
-        "lon": float(lon),
-        "distance_m": round(total_distance, 2),
-        "pace_spm": round(pace_spm, 1) if pace_spm else None,
-        "timestamp": tp.timestamp.strftime("%H:%M:%S"),
-    }
-
-    # broadcast to websocket group (async)
-    try:
-        await broadcast_to_race_async(race_id, payload)
-    except Exception:
-        # do not fail the request if broadcast fails
-        pass
-
-    return JsonResponse({"status": "ok", "data": payload})
