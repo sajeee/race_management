@@ -1,27 +1,150 @@
 {% load static %}
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Race Dashboard — {{ race.name }}</title>
-<link rel="stylesheet" href="{% static 'tracking/css/styles.css' %}">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<style>#map{height:80vh;} table{border-collapse:collapse;width:100%}</style>
+  <meta charset="utf-8">
+  <title>{{ race.name }} — Live Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="{% static 'tracking/css/styles.css' %}">
+
+  <style>
+    body {
+      font-family: 'Inter', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f8fafc;
+      color: #111827;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1e3a8a;
+      color: white;
+      padding: 1rem 2rem;
+      text-align: center;
+      font-size: 1.3rem;
+      font-weight: 600;
+    }
+
+    .dashboard-container {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding: 1rem;
+    }
+
+    #map {
+      flex: 1 1 60%;
+      height: 75vh;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    .leaderboard-card {
+      flex: 1 1 35%;
+      background: white;
+      border-radius: 12px;
+      padding: 1rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    th, td {
+      padding: 0.6rem;
+      text-align: center;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    th {
+      background: #1e40af;
+      color: white;
+      font-weight: 600;
+    }
+
+    tr:hover {
+      background-color: #f1f5f9;
+    }
+
+    .text-center {
+      text-align: center;
+    }
+
+    .text-muted {
+      color: #9ca3af;
+    }
+
+    @media (max-width: 768px) {
+      .dashboard-container {
+        flex-direction: column;
+      }
+
+      #map {
+        height: 60vh;
+        flex: 1 1 100%;
+      }
+
+      .leaderboard-card {
+        flex: 1 1 100%;
+      }
+    }
+  </style>
 </head>
+
 <body>
-<h1>{{ race.name }} — Live Dashboard</h1>
-<div style="display:flex;gap:16px">
-<div id="map" style="flex:1"></div>
-<div style="width:360px">
-<h3>Leaderboard</h3>
-<table id="leaderboard">
-<thead><tr><th>#</th><th>Bib</th><th>Name</th><th>Dist (m)</th><th>Pace min/km</th><th>Speed km/h</th><th>Last Update</th></tr></thead>
-<tbody id="leaderboard-body"><tr><td colspan="7">No runners yet</td></tr></tbody>
-</table>
-</div>
-</div>
-<script>window.RACE_ID={{ race.id }};</script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="{% static 'tracking/js/dashboard.js' %}"></script>
+  <header>{{ race.name }} — Live Dashboard</header>
+
+  <div class="dashboard-container">
+    <div id="map"></div>
+
+    <div class="leaderboard-card">
+      <h3 style="margin-top: 0;">🏁 Leaderboard</h3>
+      <table id="leaderboard">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Bib</th>
+            <th>Name</th>
+            <th>Dist (m)</th>
+            <th>Pace min/km</th>
+            <th>Speed km/h</th>
+            <th>Last Update</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboard-body">
+          <tr><td colspan="7" class="text-center text-muted">No runners yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // Make race ID available globally before dashboard.js loads
+    window.RACE_ID = {{ race.id }};
+  </script>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Dashboard Logic -->
+  <script src="{% static 'tracking/js/dashboard.js' %}"></script>
 </body>
 </html>
+
