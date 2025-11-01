@@ -1,3 +1,4 @@
+// tracking/static/tracking/js/dashboard.js
 console.log("🚀 Enhanced dashboard.js loaded");
 
 // ------------------------------------------------------------
@@ -11,185 +12,163 @@ console.log("🌐 WebSocket URL:", WS_URL);
 // MAP INITIALIZATION
 // ------------------------------------------------------------
 (function initMap() {
-  try {
-    const el = document.getElementById("map");
-    if (!el) return console.error("❌ #map element missing in DOM");
-
-    window.map = L.map(el).setView([31.5204, 74.3587], 12);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(window.map);
-
-    console.log("🗺️ Map ready");
-  } catch (err) {
-    console.error("Map init failed:", err);
-  }
+  const el = document.getElementById("map");
+  if (!el) return console.error("#map missing");
+  window.map = L.map(el).setView([31.5204, 74.3587], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(window.map);
 })();
 
 window.markers = {};
-window.runnerData = {}; // store all runner data centrally
+window.runnerData = {};
 
 // ------------------------------------------------------------
-// SMOOTH MOVEMENT
+// SMOOTH MOVEMENT (with lock)
 // ------------------------------------------------------------
 function moveMarkerSmooth(marker, fromLatLng, toLatLng, duration = 1000) {
+  if (marker._animating) return;
+  marker._animating = true;
   const start = Date.now();
   const from = { lat: fromLatLng[0], lng: fromLatLng[1] };
   const to = { lat: toLatLng[0], lng: toLatLng[1] };
   function animate() {
-    const now = Date.now();
-    const t = Math.min(1, (now - start) / duration);
+    const t = Math.min(1, (Date.now() - start) / duration);
     const lat = from.lat + (to.lat - from.lat) * t;
     const lng = from.lng + (to.lng - from.lng) * t;
     marker.setLatLng([lat, lng]);
     if (t < 1) requestAnimationFrame(animate);
+    else marker._animating = false;
   }
   requestAnimationFrame(animate);
 }
 
 // ------------------------------------------------------------
-// LEADERBOARD UPDATE + SORT
+// LEADERBOARD UPDATE
 // ------------------------------------------------------------
 function updateLeaderboard() {
   const tbody = document.querySelector("#leaderboard tbody");
   if (!tbody) return;
-
   const runners = Object.values(window.runnerData);
-
-  // Sort by distance (descending)
   runners.sort((a, b) => (b.distance_m || 0) - (a.distance_m || 0));
-
-  // Clear existing rows
   tbody.innerHTML = "";
-
-  runners.forEach((r, index) => {
+  runners.forEach((r, idx) => {
     const tr = document.createElement("tr");
     tr.dataset.id = r.runner_id;
-
-    // Medal emoji for top 3
-    let medal = "";
-    if (index === 0) medal = "🥇";
-    else if (index === 1) medal = "🥈";
-    else if (index === 2) medal = "🥉";
-
-    // Speed (km/h)
-    const speedKmh =
-      r.pace_spm && r.pace_spm > 0 ? (3600 / r.pace_spm).toFixed(1) : "-";
-
-    // Last update (relative)
+    const medal = idx===0 ? "🥇" : idx===1 ? "🥈" : idx===2 ? "🥉" : "";
+    const speedKmh = r.pace_spm ? (3600 / r.pace_spm).toFixed(1) : "-";
     const ago = r.last_update ? timeAgo(r.last_update) : "-";
-
     tr.innerHTML = `
-      <td>${index + 1}</td>
+      <td>${idx + 1}</td>
       <td>${r.runner_id}</td>
       <td>${medal} ${r.name}</td>
-      <td class="distance">${r.distance_m?.toFixed(1) || 0}</td>
-      <td class="pace">${r.pace_spm?.toFixed(1) || "-"}</td>
+      <td class="distance">${(r.distance_m || 0).toFixed(1)}</td>
+      <td class="pace">${r.pace_spm ? r.pace_spm.toFixed(1) : "-"}</td>
       <td class="speed">${speedKmh}</td>
       <td class="ago">${ago}</td>
     `;
-
     tbody.appendChild(tr);
   });
+  updateStatsBanner();
 }
 
-// ------------------------------------------------------------
-// RELATIVE TIME HELPER
-// ------------------------------------------------------------
+function updateStatsBanner() {
+  const total = Object.keys(window.runnerData).length;
+  const top = Object.values(window.runnerData).sort((a,b)=> (b.distance_m||0)-(a.distance_m||0))[0];
+  const banner = document.getElementById("race-stats");
+  if (banner) banner.textContent = `🏃 Runners: ${total} | 🥇 Leader: ${top?.name || "-"} (${((top?.distance_m||0)/1000).toFixed(2)} km)`;
+}
+
 function timeAgo(ts) {
   const diff = (Date.now() - ts) / 1000;
   if (diff < 60) return `${Math.floor(diff)}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+  return `${Math.floor(diff/3600)}h ago`;
 }
-setInterval(updateLeaderboard, 5000); // refresh "ago" every 5s
+setInterval(() => { updateLeaderboard(); }, 5000);
 
 // ------------------------------------------------------------
-// WEBSOCKET HANDLER
+// WEBSOCKET WITH RECONNECT
 // ------------------------------------------------------------
-window.socket = new WebSocket(WS_URL);
+let socket = null;
+let reconnectTimer = null;
 
-window.socket.onopen = () => console.log("✅ WS connected");
-window.socket.onerror = (e) => console.error("❌ WS error", e);
-window.socket.onclose = () => console.warn("⚠️ WS closed");
+function connectWS() {
+  socket = new WebSocket(WS_URL);
+  socket.onopen = () => {
+    console.log("✅ WS connected");
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  };
+  socket.onerror = (e) => console.error("❌ WS error", e);
+  socket.onclose = (e) => {
+    console.warn("⚠️ WS closed, reconnect in 3s", e);
+    reconnectTimer = setTimeout(connectWS, 3000);
+  };
+  socket.onmessage = handleWSMessage;
+  window.socket = socket;
+}
 
-window.socket.onmessage = (e) => {
+function handleWSMessage(e) {
   try {
     const msg = JSON.parse(e.data);
-    console.log("📡 WS message:", msg);
-
+    // allow either wrapper {type, message} or raw payload
+    const data = msg.message || msg;
     if (msg.type === "info") return;
 
-    const data = msg.message || msg;
     const lat = parseFloat(data.lat ?? data.latitude);
     const lon = parseFloat(data.lon ?? data.lng ?? data.longitude);
-
-    if (isNaN(lat) || isNaN(lon)) {
-      console.warn("⚠️ Invalid coordinates in:", data);
-      return;
-    }
+    if (isNaN(lat) || isNaN(lon)) return;
 
     const id = data.runner_id || data.id || "unknown";
     const name = data.name || `Runner ${id}`;
     const newPos = [lat, lon];
 
-    // Update marker
     if (!window.markers[id]) {
-      window.markers[id] = L.marker(newPos)
-        .addTo(window.map)
-        .bindPopup(name);
+      window.markers[id] = L.marker(newPos).addTo(window.map).bindPopup(name);
       window.map.setView(newPos, 14);
-      console.log(`📍 Created marker for ${name}`);
     } else {
       const cur = window.markers[id].getLatLng();
       moveMarkerSmooth(window.markers[id], [cur.lat, cur.lng], newPos, 800);
-      window.markers[id].bindPopup(
-        `${name}<br>${data.timestamp || "Just now"}`
-      );
+      window.markers[id].bindPopup(`${name}<br>${data.timestamp || "Just now"}`);
     }
 
-    // Save runner data
     window.runnerData[id] = {
       ...window.runnerData[id],
       ...data,
       name,
-      last_update: Date.now(),
+      runner_id: id,
+      last_update: Date.now()
     };
 
-    // Highlight effect
-    const row = document.querySelector(`#leaderboard tr[data-id="${id}"]`);
-    if (row) {
-      row.style.transition = "background 0.5s";
-      row.style.background = "yellow";
-      setTimeout(() => (row.style.background = ""), 800);
-    }
-
+    highlightRow(id);
     updateLeaderboard();
   } catch (err) {
     console.error("❌ WS parse error:", err);
   }
-};
+}
+
+function highlightRow(id) {
+  const row = document.querySelector(`#leaderboard tr[data-id="${id}"]`);
+  if (row) {
+    row.style.transition = "background 0.5s";
+    row.style.background = "yellow";
+    setTimeout(()=> row.style.background = "", 800);
+  }
+}
+
+connectWS();
 
 // ------------------------------------------------------------
-// SIMULATE RUNNER (testing helper)
-// ------------------------------------------------------------
-window.simulateRunner = function (lat, lon, id = 999, name = "Sim Runner") {
+// simulateRunner helper (dev)
+window.simulateRunner = function(lat, lon, id=999, name="Sim Runner") {
   const fake = {
-    type: "race_update",
-    message: {
-      runner_id: id,
-      name,
-      lat,
-      lon,
-      distance_m: Math.random() * 1000,
-      pace_spm: 300 + Math.random() * 100,
-      timestamp: new Date().toLocaleTimeString(),
-    },
+    runner_id: id,
+    name,
+    lat,
+    lon,
+    distance_m: Math.random()*1000,
+    pace_spm: 300 + Math.random()*100
   };
-  console.log("🧪 Simulating runner:", fake);
-  window.socket.onmessage({ data: JSON.stringify(fake) });
+  handleWSMessage({ data: JSON.stringify(fake) });
 };
-console.log("🧪 simulateRunner() ready");
-
-
