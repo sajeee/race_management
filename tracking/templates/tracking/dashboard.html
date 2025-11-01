@@ -2,67 +2,26 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Race Dashboard — {{ race.name }}</title>
-  <link rel="stylesheet" href="{% static 'tracking/css/styles.css' %}">
-
-
-  <!-- pin Leaflet version to avoid surprise breakage -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="" crossorigin=""/>
-  <style>
-  body { font-family: Arial, sans-serif; }
-  #map { height: 80vh; }
-  #leaderboard tbody tr[data-bib] {
-    transition: background-color 0.4s;
-  }
-</style>
+<meta charset="utf-8">
+<title>Race Dashboard — {{ race.name }}</title>
+<link rel="stylesheet" href="{% static 'tracking/css/styles.css' %}">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>#map{height:80vh;} table{border-collapse:collapse;width:100%}</style>
 </head>
 <body>
-  <h1>{{ race.name }} — Live Dashboard</h1>
-    <div id="race-stats" style="font-weight:bold; margin-bottom:10px;">🏁 Waiting for runners...</div>
-  <div style="display:flex; gap:16px;">
-    <div id="map" style="flex:1"></div>
-    <div style="width:360px">
-      <h3>Leaderboard</h3>
-<table id="leaderboard" style="width:100%;border-collapse:collapse">
-  <thead>
-  <tr>
-    <th>#</th>
-    <th>Bib</th>
-    <th>Name</th>
-    <th>Dist (m)</th>
-    <th>Pace s/km</th>
-    <th>Speed (km/h)</th>
-    <th>Last Update</th>
-  </tr>
-</thead>
-
-  <tbody id="leaderboard-body">
-       <tr><td colspan="5">No runners yet</td></tr>
-  </tbody>
+<h1>{{ race.name }} — Live Dashboard</h1>
+<div style="display:flex;gap:16px">
+<div id="map" style="flex:1"></div>
+<div style="width:360px">
+<h3>Leaderboard</h3>
+<table id="leaderboard">
+<thead><tr><th>#</th><th>Bib</th><th>Name</th><th>Dist (m)</th><th>Pace min/km</th><th>Speed km/h</th><th>Last Update</th></tr></thead>
+<tbody><tr><td colspan="7">No runners yet</td></tr></tbody>
 </table>
-    </div>
-  </div>
-
-  <!-- expose the race id (inline script). This must be BEFORE dashboard.js -->
-  <script>
-    // safe: only declare once, and use `window.RACE_ID` to avoid const redeclare errors
-    window.RACE_ID = {{ race.id }};
-   // const WS_PROTO = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  //  const WS_URL = `${WS_PROTO}://${window.location.host}/ws/race/${window.RACE_ID}/`;
-  //  console.log('WS URL:', WS_URL);
-  </script>
-
-  <!-- Leaflet JS (ensure this loads before our dashboard.js) -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="" crossorigin=""></script>
-
-  <!-- our dashboard behavior -->
-
-  <script src="{% static 'tracking/js/dashboard.js' %}"></script>
-
-
-
+</div>
+</div>
+<script>window.RACE_ID={{ race.id }};</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{% static 'tracking/js/dashboard.js' %}"></script>
 </body>
 </html>
-
-
