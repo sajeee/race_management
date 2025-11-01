@@ -1,90 +1,193 @@
-console.log("🚀 dashboard.js loaded");
+/* ============================================================
+   🚀 Race Dashboard (Redis Channels Compatible)
+   Smooth marker updates + live leaderboard with pace/speed
+   ============================================================ */
 
-window.markers = {};
-window.runnerData = {};
+console.log("🚀 dashboard.js LOADED from:", window.location.href);
+console.log("🏁 Safe Dashboard JS loaded");
 
-function moveMarkerSmooth(marker, fromLatLng, toLatLng, duration=1000){
-    const start=Date.now(), from={lat:fromLatLng[0], lng:fromLatLng[1]}, to={lat:toLatLng[0], lng:toLatLng[1]};
-    function animate(){
-        const t=Math.min(1,(Date.now()-start)/duration);
-        marker.setLatLng([from.lat+(to.lat-from.lat)*t, from.lng+(to.lng-from.lng)*t]);
-        if(t<1) requestAnimationFrame(animate);
+// --- WebSocket setup ---
+const raceId = window.location.pathname.split("/").filter(Boolean).pop();
+const wsUrl =
+  (window.location.protocol === "https:" ? "wss://" : "ws://") +
+  window.location.host +
+  `/ws/race/${raceId}/`;
+
+console.log("🌐 WebSocket URL:", wsUrl);
+
+let map, runners = {}, markers = {}, leaderboardBody;
+
+// --- Initialize map ---
+document.addEventListener("DOMContentLoaded", () => {
+  map = L.map("map").setView([34.0143, 71.4749], 17);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap",
+  }).addTo(map);
+  console.log("🗺️ Leaflet map initialized");
+
+  leaderboardBody = document.querySelector("#leaderboard-body");
+  connectSocket();
+});
+
+// --- Connect WS ---
+function connectSocket() {
+  const socket = new WebSocket(wsUrl);
+  window.socket = socket;
+
+  socket.onopen = () => {
+    console.log("✅ WS connected");
+  };
+
+  socket.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log("📡 Raw WS message:", data);
+
+      if (data.type === "info") {
+        console.log("ℹ️ " + data.message);
+        return;
+      }
+
+      updateRunner(data);
+    } catch (e) {
+      console.warn("⚠️ WS parse error", e);
     }
-    requestAnimationFrame(animate);
+  };
+
+  socket.onerror = (err) => {
+    console.error("❌ WS error", err);
+  };
+
+  socket.onclose = () => {
+    console.warn("⚠️ WS closed — reconnecting in 3s…");
+    setTimeout(connectSocket, 3000);
+  };
 }
 
-function geodesicDistance([lat1, lon1], [lat2, lon2]){
-    const R = 6371000;
-    const φ1 = lat1*Math.PI/180, φ2 = lat2*Math.PI/180;
-    const Δφ=(lat2-lat1)*Math.PI/180, Δλ=(lon2-lon1)*Math.PI/180;
-    const a=Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
-    return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+// --- Update or create runner marker ---
+function updateRunner(data) {
+  const { runner_id, name, lat, lon, distance_m, pace_m_per_km, timestamp } = data;
+  const id = String(runner_id);
+
+  if (!runners[id]) {
+    runners[id] = { name, totalDist: 0, lastLat: lat, lastLon: lon, lastTime: timestamp };
+  }
+
+  const runner = runners[id];
+  runner.name = name;
+  runner.lat = lat;
+  runner.lon = lon;
+  runner.timestamp = timestamp;
+
+  // Calculate incremental distance (reset on fresh start)
+  const d = haversine(runner.lastLat, runner.lastLon, lat, lon);
+  if (d < 100) runner.totalDist += d; // ignore teleports
+  runner.lastLat = lat;
+  runner.lastLon = lon;
+
+  // Calculate pace & speed
+  const paceMinPerKm = pace_m_per_km ? (pace_m_per_km / 1000).toFixed(2) : ((1000 / (pace_m_per_km || 1)).toFixed(2));
+  const speedKmH = pace_m_per_km ? (60 / pace_m_per_km).toFixed(2) : 0;
+
+  runner.pace = isFinite(paceMinPerKm) ? paceMinPerKm : "—";
+  runner.speed = isFinite(speedKmH) ? speedKmH : "—";
+
+  // Marker management
+  if (!markers[id]) {
+    const marker = L.marker([lat, lon]).addTo(map);
+    marker.bindPopup(`<b>${name}</b>`);
+    markers[id] = marker;
+    console.log(`📍 Created marker for ${name} (${lat}, ${lon})`);
+  } else {
+    const marker = markers[id];
+    smoothMove(marker, lat, lon);
+  }
+
+  renderLeaderboard();
 }
 
-function updateLeaderboard(){
-    const tbody = document.getElementById("leaderboard-body");
-    if(!tbody) return;
+// --- Smooth movement ---
+function smoothMove(marker, lat, lon) {
+  const start = marker.getLatLng();
+  const end = L.latLng(lat, lon);
+  const duration = 1000;
+  const startTime = performance.now();
 
-    const runners = Object.values(window.runnerData).sort((a,b)=>(b.distance_m||0)-(a.distance_m||0));
-    tbody.innerHTML = "";
-
-    runners.forEach((r,i)=>{
-        const speed = r.pace_m_per_km ? (60/r.pace_m_per_km).toFixed(1) : "-";
-        const tr = document.createElement("tr");
-        tr.dataset.id = r.runner_id;
-        let medal="";
-        if(i===0) medal="🥇";
-        else if(i===1) medal="🥈";
-        else if(i===2) medal="🥉";
-
-        tr.innerHTML = `
-            <td>${i+1}</td>
-            <td>${r.runner_id}</td>
-            <td>${medal} ${r.name}</td>
-            <td>${r.distance_m?.toFixed(1) || 0}</td>
-            <td>${r.pace_m_per_km?.toFixed(1) || "-"}</td>
-            <td>${speed}</td>
-            <td>${r.timestamp || "-"}</td>
-        `;
-        tbody.appendChild(tr);
-    });
+  function animate(time) {
+    const t = Math.min((time - startTime) / duration, 1);
+    marker.setLatLng([
+      start.lat + (end.lat - start.lat) * t,
+      start.lng + (end.lng - start.lng) * t,
+    ]);
+    if (t < 1) requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
 }
 
+// --- Render leaderboard ---
+function renderLeaderboard() {
+  const arr = Object.entries(runners).map(([id, r]) => ({
+    id,
+    name: r.name,
+    dist: r.totalDist,
+    pace: r.pace,
+    speed: r.speed,
+    time: r.timestamp,
+  }));
 
-function connectWS(){
-    const proto = location.protocol==="https:"?"wss":"ws";
-    const url = `${proto}://${location.host}/ws/race/${window.RACE_ID}/`;
-    const socket = new WebSocket(url);
+  arr.sort((a, b) => b.dist - a.dist);
 
-    socket.onopen = ()=>console.log("✅ WS connected");
-    socket.onclose = ()=>{console.warn("⚠️ WS closed, reconnect in 2s"); setTimeout(connectWS,2000);};
-    socket.onerror = e=>console.error("❌ WS error", e);
+  if (!arr.length) {
+    leaderboardBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No runners yet</td></tr>`;
+    return;
+  }
 
-    socket.onmessage = e=>{
-        const msg=JSON.parse(e.data);
-        if(msg.type==="info") return;
-        const data=msg.message||msg;
-        const id=data.runner_id;
-        const newPos=[parseFloat(data.lat),parseFloat(data.lon)];
+  leaderboardBody.innerHTML = arr
+    .map(
+      (r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${r.id}</td>
+      <td>${r.name}</td>
+      <td>${r.dist.toFixed(1)}</td>
+      <td>${r.pace}</td>
+      <td>${r.speed}</td>
+      <td>${r.time.split("T").pop().split(".")[0]}</td>
+    </tr>`
+    )
+    .join("");
+}
 
-        if(!window.markers[id]){
-            window.markers[id]=L.marker(newPos).addTo(map).bindPopup(data.name);
-        }else{
-            const cur=window.markers[id].getLatLng();
-            if(geodesicDistance([cur.lat,cur.lng],newPos)>0.5){
-                moveMarkerSmooth(window.markers[id],[cur.lat,cur.lng],newPos,1000);
-            }
-            window.markers[id].bindPopup(`${data.name}<br>${data.timestamp}`);
-        }
+// --- Utility: distance (Haversine) ---
+function haversine(lat1, lon1, lat2, lon2) {
+  const toRad = (v) => (v * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
-        window.runnerData[id]={...window.runnerData[id],...data,last_update:Date.now()};
-        updateLeaderboard();
+// --- For testing offline ---
+window.simulateRunner = function () {
+  console.log("🧪 simulateRunner() called");
+  let lat = 34.0143,
+    lon = 71.4749;
+  setInterval(() => {
+    lat += (Math.random() - 0.5) * 0.0001;
+    lon += (Math.random() - 0.5) * 0.0001;
+    const fakeData = {
+      runner_id: 1,
+      name: "Syed Sajid Shah",
+      lat,
+      lon,
+      distance_m: Math.random() * 100,
+      pace_m_per_km: 5.2,
+      timestamp: new Date().toISOString(),
     };
-}
-
-connectWS();
-
-(function initMap(){
-    window.map=L.map('map').setView([34.0143,71.4749],14);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19, attribution:"&copy; OSM contributors"}).addTo(map);
-})();
+    updateRunner(fakeData);
+  }, 2000);
+  console.log("🧪 simulateRunner() is now defined globally");
+};
