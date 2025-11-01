@@ -1,9 +1,6 @@
 <!doctype html>
 <html>
-<head>
-<meta charset="utf-8">
-<title>Live Tracker</title>
-</head>
+<head><meta charset="utf-8"><title>Live Tracker</title></head>
 <body>
 <h3>Live Tracker</h3>
 Runner ID: <input id="runner" value="1"><br>
@@ -13,34 +10,30 @@ Race ID: <input id="race" value="1"><br>
 <pre id="log"></pre>
 
 <script>
-let watch = null;
-const log = msg=>document.getElementById('log').textContent+=msg+"\n";
-
+let watch=null;
+const log=msg=>document.getElementById('log').textContent+=msg+"\n";
 document.getElementById('start').onclick=()=>{
-  const r=document.getElementById('runner').value;
-  const race=document.getElementById('race').value;
-  const url=`/tracking/api/tracking/${race}/post_location/`;
-  if(!navigator.geolocation) return alert('Geolocation not supported');
-  watch=navigator.geolocation.watchPosition(pos=>{
-    fetch(url,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({runner_id:Number(r),latitude:pos.coords.latitude,longitude:pos.coords.longitude})
-    }).then(r=>r.json())
-      .then(j=>log('sent: '+pos.coords.latitude+','+pos.coords.longitude+' -> '+JSON.stringify(j)))
-      .catch(e=>log('err '+e));
-  },err=>log('geo error: '+err.message),{enableHighAccuracy:true,maximumAge:1000});
-  document.getElementById('start').disabled=true;
-  document.getElementById('stop').disabled=false;
-  log('📡 Tracking started');
+    const r=Number(document.getElementById('runner').value);
+    const race=document.getElementById('race').value;
+    const url=`/tracking/api/tracking/${race}/post_location/`;
+    if(!navigator.geolocation) return alert('Geolocation not supported');
+    watch=navigator.geolocation.watchPosition(pos=>{
+        fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({runner_id:r,latitude:pos.coords.latitude,longitude:pos.coords.longitude})})
+            .then(r=>r.json()).then(j=>log(`sent: ${pos.coords.latitude},${pos.coords.longitude} -> ${JSON.stringify(j)}`))
+            .catch(e=>log('err '+e));
+    },err=>log('geo error: '+err.message),{enableHighAccuracy:true,maximiumAge:1000});
+    document.getElementById('start').disabled=true;
+    document.getElementById('stop').disabled=false;
+    log('📡 Tracking started');
 };
-
 document.getElementById('stop').onclick=()=>{
-  if(watch) navigator.geolocation.clearWatch(watch);
-  document.getElementById('start').disabled=false;
-  document.getElementById('stop').disabled=true;
-  log('⏹ stopped');
+    if(watch) navigator.geolocation.clearWatch(watch);
+    document.getElementById('start').disabled=false;
+    document.getElementById('stop').disabled=true;
+    log('⏹ stopped');
 };
 </script>
 </body>
 </html>
+
