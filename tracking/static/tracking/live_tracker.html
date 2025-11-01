@@ -1,39 +1,184 @@
 <!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Live Tracker</title></head>
-<body>
-<h3>Live Tracker</h3>
-Runner ID: <input id="runner" value="1"><br>
-Race ID: <input id="race" value="1"><br>
-<button id="start">Start</button>
-<button id="stop" disabled>Stop</button>
-<pre id="log"></pre>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>🏃 Live Tracker</title>
 
-<script>
-let watch=null;
-const log=msg=>document.getElementById('log').textContent+=msg+"\n";
-document.getElementById('start').onclick=()=>{
-    const r=Number(document.getElementById('runner').value);
-    const race=document.getElementById('race').value;
-    const url=`/tracking/api/tracking/${race}/post_location/`;
-    if(!navigator.geolocation) return alert('Geolocation not supported');
-    watch=navigator.geolocation.watchPosition(pos=>{
-        fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({runner_id:r,latitude:pos.coords.latitude,longitude:pos.coords.longitude})})
-            .then(r=>r.json()).then(j=>log(`sent: ${pos.coords.latitude},${pos.coords.longitude} -> ${JSON.stringify(j)}`))
-            .catch(e=>log('err '+e));
-    },err=>log('geo error: '+err.message),{enableHighAccuracy:true,maximiumAge:1000});
-    document.getElementById('start').disabled=true;
-    document.getElementById('stop').disabled=false;
-    log('📡 Tracking started');
-};
-document.getElementById('stop').onclick=()=>{
-    if(watch) navigator.geolocation.clearWatch(watch);
-    document.getElementById('start').disabled=false;
-    document.getElementById('stop').disabled=true;
-    log('⏹ stopped');
-};
-</script>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --danger: #dc2626;
+      --bg: #f9fafb;
+      --card: #ffffff;
+      --radius: 16px;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      color: #111827;
+    }
+    header {
+      background: var(--primary);
+      color: white;
+      text-align: center;
+      padding: 1rem;
+      font-size: 1.25rem;
+      font-weight: 600;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    main {
+      flex: 1;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      padding: 1rem;
+      width: 100%;
+    }
+    label {
+      display: block;
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+      color: #374151;
+    }
+    input {
+      width: 100%;
+      padding: 0.5rem;
+      border-radius: var(--radius);
+      border: 1px solid #d1d5db;
+      font-size: 1rem;
+      box-sizing: border-box;
+      margin-bottom: 0.75rem;
+    }
+    button {
+      padding: 0.75rem 1.25rem;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.2s;
+      width: 48%;
+    }
+    #start {
+      background: var(--primary);
+      color: white;
+    }
+    #stop {
+      background: var(--danger);
+      color: white;
+    }
+    #start:disabled,
+    #stop:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    pre {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 0.75rem;
+      border-radius: var(--radius);
+      font-family: monospace;
+      font-size: 0.85rem;
+      overflow-y: auto;
+      height: 200px;
+      white-space: pre-wrap;
+    }
+    footer {
+      text-align: center;
+      padding: 0.75rem;
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <header>📡 Live Tracker</header>
+  <main>
+    <div class="card">
+      <label for="runner">Runner ID</label>
+      <input id="runner" value="1" type="number" min="1">
+
+      <label for="race">Race ID</label>
+      <input id="race" value="1" type="number" min="1">
+
+      <div class="btn-row">
+        <button id="start">Start</button>
+        <button id="stop" disabled>Stop</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0;">📜 Activity Log</h4>
+      <pre id="log">Ready to track your movement…</pre>
+    </div>
+  </main>
+
+  <footer>Race Management System © 2025</footer>
+
+  <script>
+    let watch = null;
+    const log = msg => {
+      const pre = document.getElementById('log');
+      pre.textContent += '\\n' + msg;
+      pre.scrollTop = pre.scrollHeight;
+    };
+
+    document.getElementById('start').onclick = () => {
+      const r = document.getElementById('runner').value;
+      const race = document.getElementById('race').value;
+      const url = `https://web-production-58a8f.up.railway.app/tracking/api/tracking/${race}/post_location/`;
+
+      if (!navigator.geolocation) return alert('Geolocation not supported on this device.');
+      watch = navigator.geolocation.watchPosition(
+        pos => {
+          fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              runner_id: Number(r),
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude
+            })
+          })
+          .then(r => r.json())
+          .then(j => log('📤 Sent → lat:' + pos.coords.latitude.toFixed(6) + ', lon:' + pos.coords.longitude.toFixed(6) + ' ✅ ' + JSON.stringify(j)))
+          .catch(e => log('❌ Error ' + e));
+        },
+        err => log('⚠️ Geolocation error: ' + err.message),
+        { enableHighAccuracy: true, maximumAge: 1000 }
+      );
+
+      document.getElementById('start').disabled = true;
+      document.getElementById('stop').disabled = false;
+      log('🚀 Tracking started…');
+    };
+
+    document.getElementById('stop').onclick = () => {
+      if (watch) navigator.geolocation.clearWatch(watch);
+      document.getElementById('start').disabled = false;
+      document.getElementById('stop').disabled = true;
+      log('🛑 Tracking stopped.');
+    };
+  </script>
 </body>
 </html>
-
