@@ -1,122 +1,67 @@
 {% load static %}
 <!doctype html>
-<html lang="en">
+<html>
 <head>
   <meta charset="utf-8">
-  <title>{{ race.name }} — Live Race Dashboard</title>
-
-  <!-- Base Styles -->
+  <title>Race Dashboard — {{ race.name }}</title>
   <link rel="stylesheet" href="{% static 'tracking/css/styles.css' %}">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
 
+
+  <!-- pin Leaflet version to avoid surprise breakage -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="" crossorigin=""/>
   <style>
-    body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background: #fafafa;
-      margin: 0;
-      padding: 16px;
-    }
-    h1 {
-      text-align: center;
-      color: #333;
-      margin-bottom: 10px;
-    }
-    .dashboard-container {
-      display: flex;
-      gap: 20px;
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-    #map {
-      flex: 1;
-      min-width: 600px;
-      height: 80vh;
-      border: 2px solid #ddd;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    }
-    .leaderboard-container {
-      width: 380px;
-      background: white;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      padding: 10px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    }
-    .leaderboard-container h3 {
-      text-align: center;
-      margin: 10px 0;
-      color: #222;
-    }
-    #leaderboard {
-      width: 100%;
-      border-collapse: collapse;
-      text-align: center;
-      font-size: 14px;
-    }
-    #leaderboard th, #leaderboard td {
-      border: 1px solid #ccc;
-      padding: 6px;
-    }
-    #leaderboard th {
-      background: #f5f5f5;
-      font-weight: bold;
-    }
-    #leaderboard tbody tr {
-      transition: background 0.3s;
-    }
-    #leaderboard tbody tr:hover {
-      background: #fffae6;
-    }
-    footer {
-      margin-top: 16px;
-      text-align: center;
-      color: #777;
-      font-size: 13px;
-    }
-  </style>
+  body { font-family: Arial, sans-serif; }
+  #map { height: 80vh; }
+  #leaderboard tbody tr[data-bib] {
+    transition: background-color 0.4s;
+  }
+</style>
 </head>
 <body>
-  <h1>🏁 {{ race.name }} — Live Dashboard</h1>
+  <h1>{{ race.name }} — Live Dashboard</h1>
+  <div style="display:flex; gap:16px;">
+    <div id="map" style="flex:1"></div>
+    <div style="width:360px">
+      <h3>Leaderboard</h3>
+<table id="leaderboard" style="width:100%;border-collapse:collapse">
+  <thead>
+  <tr>
+    <th>#</th>
+    <th>Bib</th>
+    <th>Name</th>
+    <th>Dist (m)</th>
+    <th>Pace s/km</th>
+    <th>Speed (km/h)</th>
+    <th>Last Update</th>
+  </tr>
+</thead>
 
-  <div class="dashboard-container">
-    <!-- 🗺️ Map Section -->
-    <div id="map"></div>
-
-    <!-- 🏆 Leaderboard Section -->
-    <div class="leaderboard-container">
-      <h3>🏆 Live Leaderboard</h3>
-      <table id="leaderboard">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Bib</th>
-            <th>Name</th>
-            <th>Dist (m)</th>
-            <th>Pace (min/km)</th>
-            <th>Speed (km/h)</th>
-            <th>Last</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td colspan="7">Loading...</td></tr>
-        </tbody>
-      </table>
+  <tbody id="leaderboard-body">
+       <tr><td colspan="5">No runners yet</td></tr>
+  </tbody>
+</table>
     </div>
   </div>
 
-  <footer>📡 Connected runners update automatically in real-time.</footer>
-
-  <!-- Expose Race ID -->
+  <!-- expose the race id (inline script). This must be BEFORE dashboard.js -->
   <script>
+    // safe: only declare once, and use `window.RACE_ID` to avoid const redeclare errors
     window.RACE_ID = {{ race.id }};
+   // const WS_PROTO = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  //  const WS_URL = `${WS_PROTO}://${window.location.host}/ws/race/${window.RACE_ID}/`;
+  //  console.log('WS URL:', WS_URL);
   </script>
 
-  <!-- Libraries -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Leaflet JS (ensure this loads before our dashboard.js) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="" crossorigin=""></script>
 
-  <!-- Custom Dashboard Logic -->
+  <!-- our dashboard behavior -->
+
   <script src="{% static 'tracking/js/dashboard.js' %}"></script>
+
+
+
 </body>
 </html>
+
 
