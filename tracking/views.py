@@ -17,7 +17,7 @@ from .models import TrackingPoint
 
 def dashboard(request, race_id):
     """
-    Display live dashboard showing each runner’s last known position for a race.
+    Live dashboard: latest runner positions.
     """
     race = get_object_or_404(Race, id=race_id)
 
@@ -36,11 +36,20 @@ def dashboard(request, race_id):
             .first()
         )
         if last_point:
+            # Compute distance from race start (first point)
+            first_point = TrackingPoint.objects.filter(runner=runner, race=race).order_by("timestamp").first()
+            distance_m = geodesic(
+                (first_point.location.y, first_point.location.x),
+                (last_point.location.y, last_point.location.x)
+            ).meters if first_point else 0
+
             runner_data.append({
+                "runner_id": runner.id,
                 "name": f"{runner.first_name} {runner.last_name}",
                 "lat": last_point.location.y,
                 "lng": last_point.location.x,
-                "time": last_point.timestamp.strftime("%H:%M:%S"),
+                "distance_m": round(distance_m, 2),
+                "timestamp": last_point.timestamp.strftime("%H:%M:%S")
             })
 
     context = {
@@ -53,7 +62,7 @@ def dashboard(request, race_id):
 @csrf_exempt
 def post_location(request, race_id):
     """
-    Receives live GPS data and updates the live race.
+    Receive live GPS data and broadcast to WebSocket.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -75,7 +84,7 @@ def post_location(request, race_id):
         timestamp = timezone.now()
         tp = TrackingPoint.objects.create(runner=runner, race=race, location=location, timestamp=timestamp)
 
-        # Compute total distance & pace
+        # Compute total distance and pace
         points = TrackingPoint.objects.filter(runner=runner, race=race).order_by("timestamp").values_list("location", "timestamp")
         total_distance = 0.0
         total_time = 0.0
@@ -90,27 +99,28 @@ def post_location(request, race_id):
                     total_time += (time - prev_time).total_seconds()
             prev_point, prev_time = loc, time
 
-        pace_spm = (total_time / (total_distance / 1000)) if total_distance > 0 else 0
-
-        # Prepare message
-        message = {
-            "runner_id": runner.id,
-            "name": f"{runner.first_name} {runner.last_name}",
-            "lat": float(lat),
-            "lon": float(lon),
-            "distance_m": round(total_distance, 2),
-            "pace_spm": round(pace_spm, 1) if pace_spm else None,
-            "timestamp": tp.timestamp.strftime("%H:%M:%S"),
-        }
+        pace_m_per_km = (total_time / 60) / (total_distance / 1000) if total_distance > 0 else 0
 
         # Broadcast via WebSocket
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"race_{race_id}",
-            {"type": "race_update", "message": message},
+            {"type": "race_update",
+             "message": {
+                 "runner_id": runner.id,
+                 "name": f"{runner.first_name} {runner.last_name}",
+                 "lat": float(lat),
+                 "lon": float(lon),
+                 "distance_m": round(total_distance, 2),
+                 "pace_m_per_km": round(pace_m_per_km, 2) if pace_m_per_km else None,
+                 "timestamp": tp.timestamp.strftime("%H:%M:%S"),
+             }},
         )
 
-        return JsonResponse({"status": "ok", "data": message})
+        return JsonResponse({"status": "ok", "data": {
+            "distance_m": round(total_distance, 2),
+            "pace_m_per_km": round(pace_m_per_km, 2) if pace_m_per_km else None,
+        }})
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
