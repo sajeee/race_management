@@ -41,9 +41,14 @@ INSTALLED_APPS = [
 ROOT_URLCONF = 'race_management.urls'
 
 ASGI_APPLICATION = 'race_management.asgi.application'
+
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
 CHANNEL_LAYERS = {
     "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+        },
     },
 }
 MIDDLEWARE = [
